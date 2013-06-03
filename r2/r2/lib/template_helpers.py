@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -24,7 +24,10 @@ from r2.models import *
 from filters import unsafe, websafe, _force_unicode, _force_utf8
 from r2.lib.utils import vote_hash, UrlParser, timesince, is_subdomain
 
+from r2.lib import hooks
+from r2.lib.static import static_mtime
 from r2.lib.media import s3_direct_url
+from r2.lib import js
 
 import babel.numbers
 import simplejson
@@ -56,6 +59,7 @@ def static(path, allow_gzip=True):
     is_text = extension in static_text_extensions
     can_gzip = is_text and 'gzip' in request.accept_encoding
     should_gzip = allow_gzip and can_gzip
+    should_cache_bust = False
 
     path_components = []
     actual_filename = None
@@ -63,24 +67,20 @@ def static(path, allow_gzip=True):
     if not c.secure and g.static_domain:
         scheme = 'http'
         domain = g.static_domain
-        query = None
         suffix = '.gzip' if should_gzip and g.static_pre_gzipped else ''
     elif c.secure and g.static_secure_domain:
         scheme = 'https'
         domain = g.static_secure_domain
-        query = None
         suffix = '.gzip' if should_gzip and g.static_secure_pre_gzipped else ''
     else:
         path_components.append(c.site.static_path)
-        query = None
 
         if g.uncompressedJS:
-            query = 'v=' + str(random.randint(1, 1000000))
-
             # unminified static files are in type-specific subdirectories
             if not dirname and is_text:
                 path_components.append(static_text_extensions[extension])
 
+            should_cache_bust = True
             actual_filename = filename
 
         scheme = None
@@ -93,6 +93,12 @@ def static(path, allow_gzip=True):
     path_components.append(actual_filename + suffix)
 
     actual_path = os.path.join(*path_components)
+
+    query = None
+    if path and should_cache_bust:
+        file_id = static_mtime(actual_path) or random.randint(0, 1000000)
+        query = 'v=' + str(file_id)
+
     return urlparse.urlunsplit((
         scheme,
         domain,
@@ -131,8 +137,6 @@ def js_config(extra_config=None):
         "https_endpoint": is_subdomain(request.host, g.domain) and g.https_endpoint,
         # debugging?
         "debug": g.debug,
-        "vl": {},
-        "sr": {},
         "status_msg": {
           "fetching": _("fetching title..."),
           "submitting": _("submitting..."),
@@ -144,12 +148,33 @@ def js_config(extra_config=None):
         "clicktracker_url": g.clicktracker_url,
         "uitracker_url": g.uitracker_url,
         "static_root": static(''),
+        "over_18": bool(c.over18),
     }
 
     if extra_config:
         config.update(extra_config)
 
+    hooks.get_hook("js_config").call(config=config)
+
     return config
+
+
+class JSPreload(js.DataSource):
+    def __init__(self, data=None):
+        if data is None:
+            data = {}
+        js.DataSource.__init__(self, "r.preload.set({content})", data)
+
+    def set(self, url, data):
+        self.data[url] = data
+
+    def use(self):
+        hooks.get_hook("js_preload.use").call(js_preload=self)
+
+        if self.data:
+            return js.DataSource.use(self)
+        else:
+            return ''
 
 
 def class_dict():

@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -90,6 +90,7 @@ class Account(Thing):
                      pref_show_sponsors = True, # sponsored links
                      pref_show_sponsorships = True,
                      pref_highlight_new_comments = True,
+                     pref_monitor_mentions=True,
                      mobile_compress = False,
                      mobile_thumbnail = True,
                      trusted_sponsor = False,
@@ -351,6 +352,7 @@ class Account(Thing):
 
     def delete(self, delete_message=None):
         self.delete_message = delete_message
+        self.delete_time = datetime.now(g.tz)
         self._deleted = True
         self._commit()
 
@@ -619,6 +621,23 @@ class Account(Thing):
     def update_sr_activity(self, sr):
         if not self._spam:
             AccountsActiveBySR.touch(self, sr)
+
+    def get_trophy_id(self, uid):
+        '''Return the ID of the Trophy associated with the given "uid"
+
+        `uid` - The unique identifier for the Trophy to look up
+
+        '''
+        return getattr(self, 'received_trophy_%s' % uid, None)
+
+    def set_trophy_id(self, uid, trophy_id):
+        '''Recored that a user has received a Trophy with "uid"
+
+        `uid` - The trophy "type" that the user should only have one of
+        `trophy_id` - The ID of the corresponding Trophy object
+
+        '''
+        return setattr(self, 'received_trophy_%s' % uid, trophy_id)
 
 class FakeAccount(Account):
     _nodb = True

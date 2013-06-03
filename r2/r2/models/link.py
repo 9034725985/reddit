@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -29,8 +29,8 @@ from subreddit import Subreddit, DomainSR
 from printable import Printable
 from r2.config import cache, extensions
 from r2.lib.memoize import memoize
-from r2.lib.filters import _force_utf8
-from r2.lib import utils
+from r2.lib.filters import _force_utf8, _force_unicode
+from r2.lib import hooks, utils
 from r2.lib.log import log_text
 from mako.filters import url_escape
 from r2.lib.strings import strings, Score
@@ -126,7 +126,8 @@ class Link(Thing, Printable):
 
     def resubmit_link(self, sr_url=False):
         submit_url = self.subreddit_slow.path if sr_url else '/'
-        submit_url += 'submit?resubmit=true&url=' + url_escape(self.url)
+        submit_url += 'submit?resubmit=true&url='
+        submit_url += url_escape(_force_unicode(self.url))
         return submit_url
 
     @classmethod
@@ -251,7 +252,7 @@ class Link(Thing, Printable):
         if is_api and not c.obey_over18:
             return True
 
-        # hide NSFW links from non-logged users and under 18 logged users 
+        # hide NSFW links from non-logged users and under 18 logged users
         # if they're not explicitly visiting an NSFW subreddit or a multireddit
         if (((not c.user_is_loggedin and c.site != wrapped.subreddit)
             or (c.user_is_loggedin and not c.over18))
@@ -770,6 +771,8 @@ class Comment(Thing, Printable):
             orangered = (to.name != author.name)
             inbox_rel = Inbox._add(to, c, name, orangered=orangered)
 
+        hooks.get_hook('comment.new').call(comment=c)
+
         return (c, inbox_rel)
 
     def _save(self, user):
@@ -838,6 +841,8 @@ class Comment(Thing, Printable):
             m.insert(queries.get_all_gilded_comments(), [gilding])
             m.insert(queries.get_gilded_comments(self.sr_id), [gilding])
 
+        hooks.get_hook('comment.gild').call(comment=self, gilder=user)
+
     def _fill_in_parents(self):
         if not self.parent_id:
             self.parents = ''
@@ -877,6 +882,7 @@ class Comment(Thing, Printable):
     @classmethod
     def add_props(cls, user, wrapped):
         from r2.lib.template_helpers import add_attr, get_domain
+        from r2.lib.utils import timeago
         from r2.lib.wrapped import CachedVariable
         from r2.lib.pages import WrappedUser
 
@@ -996,7 +1002,11 @@ class Comment(Thing, Printable):
                 extra_css += " border"
 
             if profilepage:
-                item.link_author = WrappedUser(authors[item.link.author_id])
+                if not item.link._deleted or user_is_admin:
+                    link_author = authors[item.link.author_id]
+                else:
+                    link_author = DeletedUser()
+                item.link_author = WrappedUser(link_author)
 
                 item.subreddit_path = item.subreddit.path
                 if cname:
@@ -1038,7 +1048,11 @@ class Comment(Thing, Printable):
             else:
                 item.votable = True
 
-            if (item.link.contest_mode and
+            hide_period = ('{0} minutes'
+                          .format(item.subreddit.comment_score_hide_mins))
+
+            if ((item._date > timeago(hide_period) or
+                 item.link.contest_mode) and
                  not (c.user_is_admin or
                       c.user_is_loggedin and
                         item.subreddit.is_moderator(c.user))):
@@ -1047,6 +1061,7 @@ class Comment(Thing, Printable):
                 item.score = 1
                 item.score_hidden = True
                 item.voting_score = [1, 1, 1]
+                item.render_css_class += " score-hidden"
             else:
                 item.score_hidden = False
 
@@ -1235,12 +1250,13 @@ class Message(Thing, Printable):
             # (i.e., don't do it for automated messages from the SR)
             if parent or to_subreddit and not from_sr:
                 inbox_rel.append(ModeratorInbox._add(sr, m, 'inbox'))
-            if author.name in g.admins:
-                m.distinguished = 'admin'
-                m._commit()
-            elif sr.is_moderator(author):
+            if sr.is_moderator(author):
                 m.distinguished = 'yes'
                 m._commit()
+
+        if author.name in g.admins:
+            m.distinguished = 'admin'
+            m._commit()
 
         # if there is a "to" we may have to create an inbox relation as well
         # also, only global admins can be message spammed.
@@ -1360,14 +1376,23 @@ class Message(Thing, Printable):
                 item.permalink = item.lookups[0].make_permalink(link, sr=sr)
                 item.link_permalink = link.make_permalink(sr)
                 if item.parent_id:
-                    item.subject = _('comment reply')
-                    item.message_style = "comment-reply"
                     parent = parents[item.parent_id]
                     item.parent = parent._fullname
                     item.parent_permalink = parent.make_permalink(link, sr)
+
+                    if parent.author_id == c.user._id:
+                        item.subject = _('comment reply')
+                        item.message_style = "comment-reply"
+                    else:
+                        item.subject = _('username mention')
+                        item.message_style = "mention"
                 else:
-                    item.subject = _('post reply')
-                    item.message_style = "post-reply"
+                    if link.author_id == c.user._id:
+                        item.subject = _('post reply')
+                        item.message_style = "post-reply"
+                    else:
+                        item.subject = _('username mention')
+                        item.message_style = "mention"
             elif item.sr_id is not None:
                 item.subreddit = m_subreddits[item.sr_id]
 
@@ -1419,6 +1444,13 @@ class Message(Thing, Printable):
         from subreddit import Subreddit
         if self.sr_id:
             return Subreddit._byID(self.sr_id)
+
+    @property
+    def author_slow(self):
+        """Returns the message's author."""
+        # The author is often already on the wrapped message as .author
+        # If available, that should be used instead of calling this
+        return Account._byID(self.author_id, data=True, return_dict=False)
 
     @staticmethod
     def wrapped_cache_key(wrapped, style):

@@ -16,16 +16,25 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
+<div class="doc-info">
+  ${thing.toc_html}
 
-<p id="helptext">
-    ${_("Below you will see your promotion's impression and click traffic " + 
-        "per hour of promotion.  Please note that these traffic totals " + 
-        "will lag behind by two to three hours, and that daily totals will " +
-        "be preliminary until 24 hours after the link has finished its run.")}
-</p>
-<div>${thing.tabs}</div>
+  <h4>${_('revisions')}</h4>
+  <ul class="revisions">
+    %for rev in thing.revs:
+      <li
+        %if rev['id'] == thing.display_rev:
+          class="selected"
+        %endif
+      >
+        <a href="?v=${rev['id']}">${rev['title']}</a>
+      </li>
+    %endfor
+  </ul>
+</div>
 
+${thing.body_html}

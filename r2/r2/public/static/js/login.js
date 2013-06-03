@@ -119,7 +119,7 @@ r.login.ui = {
             var el = $(e.target),
                 href = el.attr('href'),
                 dest
-            if (href && href != '#') {
+            if (href && href != '#' && !/\/login\/?$/.test(href)) {
                 // User clicked on a link that requires login to continue
                 dest = href
             } else {
@@ -223,7 +223,6 @@ r.ui.RegisterForm.prototype = $.extend(new r.ui.Form(), {
 
         this.$el.find('.error.field-user').hide()
         this.$submit.attr('disabled', false)
-        this.$el.removeClass('name-available name-taken')
         this.checkUsernameDebounced(name)
         this.$el.toggleClass('name-checking', !!name)
     },
@@ -236,6 +235,8 @@ r.ui.RegisterForm.prototype = $.extend(new r.ui.Form(), {
                 success: $.proxy(this, 'displayUsernameStatus'),
                 complete: $.proxy(function() { this.$el.removeClass('name-checking') }, this)
             })
+        } else {
+            this.$el.removeClass('name-available name-taken')
         }
     },
 
@@ -271,6 +272,7 @@ r.ui.LoginPopup.prototype = $.extend(new r.ui.Base(), {
         $.request("new_captcha", {id: this.$el.attr('id')})
         this.$el
             .find(".cover-msg").toggle(!!notice).end()
+            .find('.popup').css('top', $(document).scrollTop()).end()
             .show()
     },
 

@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -89,6 +89,11 @@ class Listing(object):
             p.update({'after':next._fullname, 'before':None, 'count':acount})
             self.after = next._fullname
             self.next = (request.path + utils.query_string(p))
+
+        for count, thing in enumerate(self.things):
+            thing.rowstyle = getattr(thing, 'rowstyle', "")
+            thing.rowstyle += ' ' + ('even' if (count % 2) else 'odd')
+
         #TODO: need name for template -- must be better way
         return Wrapped(self)
 

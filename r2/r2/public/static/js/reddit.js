@@ -638,7 +638,7 @@ function sr_search(query) {
     query = query.toLowerCase();
     var cache = sr_cache();
     if (!cache[query]) {
-        $.request('search_reddit_names.json', {query: query},
+        $.request('search_reddit_names.json', {query: query, include_over_18: r.config.over_18},
                   function (r) {
                       cache[query] = r['names'];
                       update_dropdown(r['names']);
@@ -777,11 +777,13 @@ function expando_child(elem) {
                   function(r) {
                       child_cache[key] = r;
                       expando.html($.unsafe(r));
+                      $(document).trigger('expando_thing', thing)
                   },
                   false, "html");
     }
     else {
         expando.html($.unsafe(child_cache[key]));
+        $(document).trigger('expando_thing', thing)
     }
     expando.show();
     return false;

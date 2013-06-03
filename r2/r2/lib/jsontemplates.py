@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -251,6 +251,7 @@ class IdentityJsonTemplate(ThingJsonTemplate):
                                                 is_gold = "gold",
                                                 is_mod = "is_mod",
                                                 over_18 = "pref_over_18",
+                                                has_verified_email = "email_verified",
                                                 )
 
     def thing_attr(self, thing, attr):
@@ -368,6 +369,7 @@ class PromotedLinkJsonTemplate(LinkJsonTemplate):
 class CommentJsonTemplate(ThingJsonTemplate):
     _data_attrs_ = ThingJsonTemplate.data_attrs(ups          = "upvotes",
                                                 downs        = "downvotes",
+                                                score_hidden = "score_hidden",
                                                 replies      = "child",
                                                 body         = "body",
                                                 body_html    = "body_html",
@@ -467,7 +469,7 @@ class MessageJsonTemplate(ThingJsonTemplate):
                                                 first_message_name = "first_message_name")
 
     def thing_attr(self, thing, attr):
-        from r2.models import Message
+        from r2.models import Comment, Link, Message
         if attr == "was_comment":
             return thing.was_comment
         elif attr == "context":
@@ -487,12 +489,24 @@ class MessageJsonTemplate(ThingJsonTemplate):
         elif attr == "author" and getattr(thing, "hide_author", False):
             return None
         elif attr == "parent_id":
-            if getattr(thing, "parent_id", None):
+            if thing.was_comment:
+                if getattr(thing, "parent_id", None):
+                    return make_fullname(Comment, thing.parent_id)
+                else:
+                    return make_fullname(Link, thing.link_id)
+            elif getattr(thing, "parent_id", None):
                 return make_fullname(Message, thing.parent_id)
         elif attr == "first_message_name":
             if getattr(thing, "first_message", None):
                 return make_fullname(Message, thing.first_message)
         return ThingJsonTemplate.thing_attr(self, thing, attr)
+
+    def raw_data(self, thing):
+        d = ThingJsonTemplate.raw_data(self, thing)
+        if thing.was_comment:
+            d['link_title'] = thing.link_title
+            d['likes'] = thing.likes
+        return d
 
     def rendered_data(self, wrapped):
         from r2.models import Message
@@ -574,6 +588,20 @@ class UserTableItemJsonTemplate(ThingJsonTemplate):
 
     def thing_attr(self, thing, attr):
         return ThingJsonTemplate.thing_attr(self, thing.user, attr)
+
+    def inject_note(self, thing, d):
+        if (thing.type in ("banned", "wikibanned") or
+            (c.user.gold and thing.type == "friend")):
+            d["note"] = getattr(thing.rel, 'note', '')
+        return d
+
+    def rendered_data(self, thing):
+        d = ThingJsonTemplate.rendered_data(self, thing)
+        return self.inject_note(thing, d)
+
+    def raw_data(self, thing):
+        d = ThingJsonTemplate.raw_data(self, thing)
+        return self.inject_note(thing, d)
 
     def render(self, thing, *a, **kw):
         return ObjectTemplate(self.data(thing))
@@ -710,6 +738,9 @@ class SubredditSettingsTemplate(ThingJsonTemplate):
                         prev_public_description_id = 'site.prev_public_description_id',
                         language = 'site.lang',
                         subreddit_type = 'site.type',
+                        submit_link_label = 'site.submit_link_label',
+                        submit_text_label = 'site.submit_text_label',
+                        comment_score_hide_mins = 'site.comment_score_hide_mins',
                         content_options = 'site.link_type',
                         over_18 = 'site.over_18',
                         default_set = 'site.allow_top',
@@ -751,3 +782,15 @@ class ModActionTemplate(ThingJsonTemplate):
 
     def kind(self, wrapped):
         return 'modaction'
+
+
+class PolicyViewJsonTemplate(ThingJsonTemplate):
+    _data_attrs_ = dict(
+        body_html="body_html",
+        toc_html="toc_html",
+        revs="revs",
+        display_rev="display_rev",
+    )
+
+    def kind(self, wrapped):
+        return "Policy"

@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -241,11 +241,14 @@ def send_gift(buyer, recipient, months, days, signed, giftmessage, comment_id):
         message = strings.youve_got_gold % dict(sender=md_sender, amount=amount)
 
         if giftmessage and giftmessage.strip():
-            message += "\n\n" + strings.giftgold_note + giftmessage
+            message += "\n\n" + strings.giftgold_note + giftmessage + '\n\n----'
     else:
         message = strings.youve_got_comment_gold % dict(
             url=comment.make_permalink_slow(),
         )
+
+    message += '\n\n' + strings.gold_benefits_msg
+    message += '\n\n' + strings.lounge_msg % {'link': '/r/'+g.lounge_reddit}
 
     subject = sender + " just sent you reddit gold!"
 
@@ -419,6 +422,8 @@ class IpnController(RedditController):
                         pennies = int(float(trans.find("order-total"
                                                       ).contents[0])*100)
                         months, days = months_and_days_from_pennies(pennies)
+                        if not months:
+                            raise ValueError("Bad pennies for %s" % short_sn)
                         charged = trans.find("charge-amount-notification")
                         if not charged:
                             _google_charge_and_ship(short_sn)
@@ -693,6 +698,8 @@ class StripeController(GoldPaymentController):
         'charge.failed': 'failed',
         'charge.refunded': 'refunded',
         'customer.created': 'noop',
+        'transfer.created': 'noop',
+        'transfer.paid': 'noop',
     }
 
     @classmethod
@@ -700,12 +707,16 @@ class StripeController(GoldPaymentController):
         event_dict = json.loads(request.body)
         event = stripe.Event.construct_from(event_dict, g.STRIPE_SECRET_KEY)
         status = event.type
-        if status == 'customer.created':
+        if cls.event_type_mappings.get(status) == 'noop':
             return status, None, None, None, None
 
         charge = event.data.object
         description = charge.description
-        passthrough, buyer_name = description.split('-', 1)
+        try:
+            passthrough, buyer_name = description.split('-', 1)
+        except ValueError:
+            g.log.error('stripe_error on charge: %s', charge)
+            raise
         transaction_id = 'S%s' % charge.id
         pennies = charge.amount
         months, days = months_and_days_from_pennies(pennies)

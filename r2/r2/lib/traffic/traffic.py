@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -48,8 +48,12 @@ PROCESSED_DIR = g.PROCESSED_DIR
 AGGREGATE_DIR = g.AGGREGATE_DIR
 AWS_LOG_DIR = g.AWS_LOG_DIR
 
-s3_connection = S3Connection(g.TRAFFIC_ACCESS_KEY, g.TRAFFIC_SECRET_KEY)
-emr_connection = EmrConnection(g.TRAFFIC_ACCESS_KEY, g.TRAFFIC_SECRET_KEY)
+# the "or None" business is so that a blank string becomes None to cause boto
+# to look for credentials in other places.
+s3_connection = S3Connection(g.TRAFFIC_ACCESS_KEY or None,
+                             g.TRAFFIC_SECRET_KEY or None)
+emr_connection = EmrConnection(g.TRAFFIC_ACCESS_KEY or None,
+                               g.TRAFFIC_SECRET_KEY or None)
 
 traffic_categories = (SitewidePageviews, PageviewsBySubreddit,
                       PageviewsBySubredditAndPath, PageviewsByLanguage,

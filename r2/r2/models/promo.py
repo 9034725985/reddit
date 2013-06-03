@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -32,7 +32,7 @@ from r2.lib.cache import sgm
 from r2.lib.db import tdb_cassandra
 from r2.lib.db.thing import Thing, NotFound
 from r2.lib.memoize import memoize
-from r2.lib.utils import Enum
+from r2.lib.utils import Enum, to_datetime
 from r2.models.subreddit import Subreddit
 
 
@@ -57,7 +57,14 @@ def get_promote_srid(name = 'promos'):
 NO_TRANSACTION = 0
 
 class PromoCampaign(Thing):
-    
+    def __getattr__(self, attr):
+        val = Thing.__getattr__(self, attr)
+        if attr in ('start_date', 'end_date'):
+            val = to_datetime(val)
+            if not val.tzinfo:
+                val = val.replace(tzinfo=g.tz)
+        return val
+
     @classmethod 
     def _new(cls, link, sr_name, bid, start_date, end_date):
         pc = PromoCampaign(link_id=link._id,
@@ -197,6 +204,19 @@ class LiveAdWeights(object):
                    for sr_id in adweights}
         if cls.FRONT_PAGE in results:
             results[''] = results.pop(cls.FRONT_PAGE)
+        return results
+
+    @classmethod
+    def get_live_subreddits(cls):
+        q = cls._cf.get_range()
+        results = []
+        empty = {cls.column: '[]'}
+        for sr_id, columns in q:
+            if sr_id in (cls.ALL_ADS, cls.FRONT_PAGE):
+                continue
+            if not columns or columns == empty:
+                continue
+            results.append(int(sr_id))
         return results
 
     @classmethod

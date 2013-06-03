@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -218,7 +218,7 @@ class OAuth2AccessController(MinimalController):
             if access_token:
                 resp["access_token"] = access_token._id
                 resp["token_type"] = access_token.token_type
-                resp["expires_in"] = access_token._ttl
+                resp["expires_in"] = int(access_token._ttl) if access_token._ttl else None
                 resp["scope"] = access_token.scope
                 if refresh_token:
                     resp["refresh_token"] = refresh_token._id

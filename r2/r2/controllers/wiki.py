@@ -1,23 +1,23 @@
-## The contents of this file are subject to the Common Public Attribution
-## License Version 1.0. (the "License"); you may not use this file except in
-## compliance with the License. You may obtain a copy of the License at
-## http://code.reddit.com/LICENSE. The License is based on the Mozilla Public
-## License Version 1.1, but Sections 14 and 15 have been added to cover use of
-## software over a computer network and provide for limited attribution for the
-## Original Developer. In addition, Exhibit A has been modified to be
-## consistent with Exhibit B.
-##
-## Software distributed under the License is distributed on an "AS IS" basis,
-## WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License for
-## the specific language governing rights and limitations under the License.
-##
-## The Original Code is reddit.
-##
-## The Original Developer is the Initial Developer.  The Initial Developer of
-## the Original Code is reddit Inc.
-##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
-## reddit Inc. All Rights Reserved.
+# The contents of this file are subject to the Common Public Attribution
+# License Version 1.0. (the "License"); you may not use this file except in
+# compliance with the License. You may obtain a copy of the License at
+# http://code.reddit.com/LICENSE. The License is based on the Mozilla Public
+# License Version 1.1, but Sections 14 and 15 have been added to cover use of
+# software over a computer network and provide for limited attribution for the
+# Original Developer. In addition, Exhibit A has been modified to be consistent
+# with Exhibit B.
+#
+# Software distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License for
+# the specific language governing rights and limitations under the License.
+#
+# The Original Code is reddit.
+#
+# The Original Developer is the Initial Developer.  The Initial Developer of
+# the Original Code is reddit Inc.
+#
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
+# Inc. All Rights Reserved.
 ###############################################################################
 
 from pylons import request, g, c
@@ -105,9 +105,15 @@ class WikiController(RedditController):
         page, version, version2 = pv
 
         if not page:
-            if c.render_style in extensions.API_TYPES:
-                self.handle_error(404, 'PAGE_NOT_CREATED')
-            return WikiNotFound(page=page_name).render()
+            is_api = c.render_style in extensions.API_TYPES
+            if this_may_revise():
+                if is_api:
+                    self.handle_error(404, 'PAGE_NOT_CREATED')
+                errorpage = WikiNotFound(page=page_name)
+                request.environ['usable_error_content'] = errorpage.render()
+            elif is_api:
+                self.handle_error(404, 'PAGE_NOT_FOUND')
+            self.abort404()
 
         if version:
             edit_by = version.get_author()
@@ -289,7 +295,8 @@ class WikiApiController(WikiController):
             error = c.errors.get(('WIKI_CREATE_ERROR', 'page'))
             if error:
                 self.handle_error(403, **(error.msg_params or {}))
-            page = WikiPage.create(c.site, page_name)
+            if not c.user._spam:
+                page = WikiPage.create(c.site, page_name)
         if c.user._spam:
             error = _("You are doing that too much, please try again later.")
             self.handle_error(415, 'SPECIAL_ERRORS', special_errors=[error])

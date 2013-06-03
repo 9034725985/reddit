@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -28,8 +28,9 @@ from pylons import config
 
 
 def not_in_sr(environ, results):
-    return 'subreddit' not in environ and 'sub_domain' not in environ
-
+    return ('subreddit' not in environ and
+            'sub_domain' not in environ and
+            'domain' not in environ)
 
 def make_map():
     map = Mapper()
@@ -59,12 +60,17 @@ def make_map():
        action='lang_traffic', langcode='')
     mc('/traffic/adverts/:code', controller='front',
        action='advert_traffic', code='')
+    mc('/traffic/subreddits/report', controller='front',
+       action='subreddit_traffic_report')
     mc('/account-activity', controller='front', action='account_activity')
 
     mc('/about/message/:where', controller='message', action='listing')
     mc('/about/log', controller='front', action='moderationlog')
     mc('/about/sidebar', controller='front', action='sidebar')
     mc('/about', controller='front', action='about')
+    mc('/about/flair', controller='front', action='flairlisting')
+    mc('/about/:location', controller='front', action='spamlisting',
+       requirements=dict(location='reports|spam|modqueue|unmoderated'))
     mc('/about/:location', controller='front', action='editreddit',
        location='about')
 
@@ -100,16 +106,15 @@ def make_map():
     mc('/bookmarklets', controller='buttons', action='bookmarklets')
 
     mc('/awards', controller='front', action='awards')
+    mc('/awards/confirm/:code', controller='front',
+       action='confirm_award_claim')
+    mc('/awards/claim/:code', controller='front', action='claim_award')
+    mc('/awards/received', controller='front', action='received_award')
 
     mc('/i18n', controller='redirect', action='redirect',
        dest='http://www.reddit.com/r/i18n')
     mc('/feedback', controller='feedback', action='feedback')
     mc('/ad_inq', controller='feedback', action='ad_inq')
-
-    # Used for editing ads
-    mc('/admin/ads', controller='ads')
-    mc('/admin/ads/:adcn/:action', controller='ads',
-       requirements=dict(action="assign|srs"))
 
     mc('/admin/awards', controller='awards')
     mc('/admin/awards/:awardcn/:action', controller='awards',
@@ -144,8 +149,8 @@ def make_map():
        action='related', title=None)
     mc('/details/:article/:title', controller='front',
        action='details', title=None)
-    mc('/traffic/:article/:title', controller='front',
-       action='traffic', title=None)
+    mc('/traffic/:link/:campaign', controller='front', action='traffic',
+       campaign=None)
     mc('/comments/:article/:title/:comment', controller='front',
        action='comments', title=None, comment=None)
     mc('/duplicates/:article/:title', controller='front',
@@ -173,11 +178,12 @@ def make_map():
     mc('/promoted/admin/graph', controller='promote', action='admingraph')
     mc('/promoted/inventory/:sr_name',
        controller='promote', action='inventory')
-    mc('/promoted/traffic/headline/:link',
-       controller='front', action='promo_traffic')
 
     mc('/promoted/:action', controller='promote',
        requirements=dict(action="edit_promo|new_promo|roadblock"))
+    mc('/promoted/report', controller='promote', action='report')
+    mc('/promoted/:sort/:sr', controller='promote', action='listing',
+       requirements=dict(sort='live_promos'))
     mc('/promoted/:sort', controller='promote', action="listing")
     mc('/promoted/', controller='promoted', action="listing", sort="")
 
@@ -208,6 +214,7 @@ def make_map():
     mc('/gold', controller='forms', action="gold")
     mc('/gold/creditgild/:passthrough', controller='forms', action='creditgild')
     mc('/gold/about', controller='front', action='gold_info')
+    mc('/gold/partners', controller='front', action='gold_partners')
     mc('/gold/thanks', controller='front', action='goldthanks')
 
     mc('/password', controller='forms', action="password")
@@ -217,6 +224,10 @@ def make_map():
        requirements=dict(action="blog"))
     mc('/help/gold', controller='redirect', action='redirect',
        dest='/gold/about')
+
+    mc('/help/:page', controller='policies', action='policy_page',
+       conditions={'function':not_in_sr},
+       requirements={'page':'privacypolicy|useragreement'})
 
     mc('/wiki/create/*page', controller='wiki', action='wiki_create')
     mc('/wiki/edit/*page', controller='wiki', action='wiki_revise')
@@ -293,6 +304,9 @@ def make_map():
                                  "add_roadblock|rm_roadblock")))
     mc('/api/:action', controller='apiminimal',
        requirements=dict(action="new_captcha"))
+    mc('/api/:type', controller='api',
+       requirements=dict(type='wikibannednote|bannednote'),
+       action='relnote')
     mc('/api/:action', controller='api')
 
     mc("/api/v1/:action", controller="oauth2frontend",
@@ -314,9 +328,6 @@ def make_map():
 
     mc('/doquery', controller='query', action='doquery')
 
-    mc('/store', controller='redirect', action='redirect',
-       dest='http://store.reddit.com/index.html')
-
     mc('/code', controller='redirect', action='redirect',
        dest='http://github.com/reddit/')
 
@@ -330,9 +341,6 @@ def make_map():
 
     # Used for showing ads
     mc("/ads/", controller="ad", action="ad")
-    mc("/ads/r/:reddit_name/:keyword", controller="ad", action="ad",
-       keyword=None)
-    mc("/ads/:codename", controller="ad", action="ad_by_codename")
 
     mc("/try", controller="forms", action="try_compact")
 

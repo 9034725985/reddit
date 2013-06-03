@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -108,7 +108,6 @@ class Builder(object):
 
         types = {}
         wrapped = []
-        count = 0
 
         modlink = {}
         modlabel = {}
@@ -213,11 +212,6 @@ class Builder(object):
                 if getattr(item, "verdict", None):
                     if not item.verdict.endswith("-approved"):
                         w.link_notes.append(w.verdict)
-
-            w.rowstyle = getattr(w, 'rowstyle', "")
-            w.rowstyle += ' ' + ('even' if (count % 2) else 'odd')
-
-            count += 1
 
             if c.user_is_admin and getattr(item, 'ip', None):
                 w.ip_span = ip_span(item.ip)
@@ -582,6 +576,9 @@ class SearchBuilder(IDBuilder):
         # them in normal listings
         # TODO: Consider a flag to disable this (and see listingcontroller.py)
         if item._spam or item._deleted:
+            return False
+        # If checking (wrapped) links, filter out banned subreddits
+        elif hasattr(item, 'subreddit') and item.subreddit.spammy():
             return False
         elif (self.skip_deleted_authors and
               getattr(item, "author", None) and item.author._deleted):

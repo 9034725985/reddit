@@ -16,7 +16,7 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
@@ -25,6 +25,7 @@
     from r2.lib.filters import safemarkdown
     from r2.controllers.api_docs import section_info
     from r2.models.token import OAuth2Scope
+    from r2.lib.db.thing import thing_types
 %>
 
 <%def name="api_method_id(uri, method)">${method}_${uri.replace('/', '_').strip('_')}</%def>
@@ -128,6 +129,38 @@
     <p><strong>Please take care to respect our&#32;<a href="https://github.com/reddit/reddit/wiki/API">API access rules</a>.</strong></p>
   </div>
 
+  <div class="section overview">
+    <h2>overview</h2>
+
+    <h3 id="modhashes">modhashes</h3>
+
+    <p>A modhash is a token that the reddit API requires to help prevent&#32;<a
+      href="http://en.wikipedia.org/wiki/CSRF">CSRF</a>. Modhashes can be
+    obtained via the&#32;<a href="#GET_api_me.json">/api/me.json</a>&#32;call
+    or in the&#32;<code>Listing</code>&#32;structures of several other API
+    calls.</p>
+
+    <h3 id="fullnames">fullnames</h3>
+
+    <p>A fullname is a combination of a thing's type
+    (e.g.&#32;<code>Link</code>) and its unique ID which forms a compact
+    encoding of a globally unique ID on reddit.</p>
+
+    <p>Fullnames start with the type prefix for the object's type, followed by
+    the thing's unique ID in&#32;<a href="http://en.wikipedia.org/wiki/Base36">base
+      36</a>. For example,&#32;<code>t3_15bfi0</code>.</p>
+
+    <table class="parameters">
+      <caption>type prefixes</caption>
+      % for typeid in sorted(thing_types):
+      <tr>
+        <th scope="row">t${typeid}_</th>
+        <td>${thing_types[typeid].__name__}</td>
+      </tr>
+      % endfor
+    </table>
+  </div>
+
   <div class="section methods">
     %for section in sorted(api):
       %if thing.mode == 'oauth':
@@ -187,7 +220,7 @@
                   %for param in sorted(params):
                     <tr>
                       <th scope="row">${param}</th>
-                      <td>${params[param]}</td>
+                      <td>${unsafe(safemarkdown(params[param], wrap=False))}</td>
                     </tr>
                   %endfor
                 %endif
@@ -195,7 +228,7 @@
                   %for param in sorted(base_params):
                     <tr class="base-param">
                       <th scope="row">${param}</th>
-                      <td>${base_params[param]}</td>
+                      <td>${unsafe(safemarkdown(base_params[param], wrap=False))}</td>
                     </tr>
                   %endfor
                 %endif

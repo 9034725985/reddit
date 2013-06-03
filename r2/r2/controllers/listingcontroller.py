@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -42,6 +42,7 @@ from r2.lib.template_helpers import add_sr
 from r2.lib.utils import iters, check_cheating, timeago
 from r2.lib import sup
 from r2.lib.validator import *
+from r2.lib.butler import extract_user_mentions
 import socket
 
 from api_docs import api_doc, api_section
@@ -297,15 +298,15 @@ class HotController(FixListing, ListingController):
                     promo_tuples,
                     wrap=self.builder_wrapper,
                     keep_fn=organic.keep_fresh_links,
-                    num=n_build,
                     skip=True,
             )
             promoted_links, first, last, before, after = b.get_items()
-            if promoted_links and last:
-                lookup = {t.campaign: i for i, t in enumerate(promo_tuples)}
-                last_index = lookup[last.campaign]
-                stubs = promo_tuples[last_index + 1:]
-                promoted_links.extend(stubs)
+            if promoted_links:
+                stubs = promoted_links[n_build:]
+                stubs = [promote.PromoTuple(item._fullname, item.weight,
+                                            item.campaign)
+                         for item in stubs]
+                promoted_links = promoted_links[:n_build] + stubs
 
         if not (organic_fullnames or promoted_links):
             return None
@@ -735,12 +736,17 @@ class MessageController(ListingController):
     @property
     def menus(self):
         if c.default_sr and self.where in ('inbox', 'messages', 'comments',
-                          'selfreply', 'unread'):
-            buttons = (NavButton(_("all"), "inbox"),
+                          'selfreply', 'unread', 'mentions'):
+            buttons = [NavButton(_("all"), "inbox"),
                        NavButton(_("unread"), "unread"),
                        NavButton(plurals.messages, "messages"),
                        NavButton(_("comment replies"), 'comments'),
-                       NavButton(_("post replies"), 'selfreply'))
+                       NavButton(_("post replies"), 'selfreply')]
+
+            if c.user.gold:
+                buttons += [NavButton(_("username mentions"),
+                                      "mentions",
+                                      css_class="gold")]
 
             return [NavMenu(buttons, base_path = '/message/',
                             default = 'inbox', type = "flatlist")]
@@ -767,6 +773,10 @@ class MessageController(ListingController):
             # don't show user their own unread stuff
             if ((self.where == 'unread' or self.subwhere == 'unread')
                 and (item.author_id == c.user._id or not item.new)):
+                return False
+
+            if (item.message_style == "mention" and
+                c.user.name.lower() not in extract_user_mentions(item.body)):
                 return False
 
             return wouldkeep
@@ -842,6 +852,8 @@ class MessageController(ListingController):
             q = queries.get_inbox_comments(c.user)
         elif self.where == 'selfreply':
             q = queries.get_inbox_selfreply(c.user)
+        elif self.where == 'mentions':
+            q = queries.get_inbox_comment_mentions(c.user)
         elif self.where == 'inbox':
             q = queries.get_inbox(c.user)
         elif self.where == 'unread':
@@ -1038,6 +1050,19 @@ class MyredditsController(ListingController, OAuth2ResourceController):
 
 class CommentsController(ListingController):
     title_text = _('comments')
+
+    def keep_fn(self):
+        def keep(item):
+            can_see_spam = (c.user_is_loggedin and
+                            (item.author_id == c.user._id or
+                             c.user_is_admin or
+                             item.subreddit.is_moderator(c.user)))
+            can_see_deleted = c.user_is_loggedin and c.user_is_admin
+
+            return ((not item._spam or can_see_spam) and
+                    (not item._deleted or can_see_deleted))
+
+        return keep
 
     def query(self):
         return c.site.get_all_comments()

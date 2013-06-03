@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -87,12 +87,11 @@ class Subreddit(Thing, Printable):
                      over_18 = False,
                      exclude_banned_modqueue = False,
                      mod_actions = 0,
-                     sponsorship_text = "this subreddit is sponsored by",
-                     sponsorship_url = None,
-                     sponsorship_img = None,
-                     sponsorship_name = None,
                      # do we allow self-posts, links only, or any?
                      link_type = 'any', # one of ('link', 'self', 'any')
+                     submit_link_label = '',
+                     submit_text_label = '',
+                     comment_score_hide_mins = 0,
                      flair_enabled = True,
                      flair_position = 'right', # one of ('left', 'right')
                      link_flair_position = '', # one of ('', 'left', 'right')
@@ -162,7 +161,8 @@ class Subreddit(Thing, Printable):
         ret = {}
 
         for name in names:
-            lname = name.lower()
+            ascii_only = str(name.decode("ascii", errors="ignore"))
+            lname = ascii_only.lower()
 
             if lname in cls._specials:
                 ret[name] = cls._specials[lname]
@@ -349,6 +349,8 @@ class Subreddit(Thing, Printable):
             return True
         elif self.is_banned(user) and not promotion:
             return False
+        elif self.spammy():
+            return False
         elif self.type == 'public':
             return True
         elif self.is_moderator(user) or self.is_contributor(user):
@@ -496,17 +498,22 @@ class Subreddit(Thing, Printable):
         from r2.lib.db import queries
         return queries.get_links(self, sort, time)
 
-    def get_spam(self):
+    def get_spam(self, include_links=True, include_comments=True):
         from r2.lib.db import queries
-        return queries.get_spam(self, user=c.user)
+        return queries.get_spam(self, user=c.user, include_links=include_links,
+                                include_comments=include_comments)
 
-    def get_reported(self):
+    def get_reported(self, include_links=True, include_comments=True):
         from r2.lib.db import queries
-        return queries.get_reported(self, user=c.user)
+        return queries.get_reported(self, user=c.user,
+                                    include_links=include_links,
+                                    include_comments=include_comments)
 
-    def get_modqueue(self):
+    def get_modqueue(self, include_links=True, include_comments=True):
         from r2.lib.db import queries
-        return queries.get_modqueue(self, user=c.user)
+        return queries.get_modqueue(self, user=c.user,
+                                    include_links=include_links,
+                                    include_comments=include_comments)
 
     def get_unmoderated(self):
         from r2.lib.db import queries
@@ -660,12 +667,15 @@ class Subreddit(Thing, Printable):
         return sr_ids + automatic_ids
 
     @classmethod
-    def random_reddit(cls, limit = 2500, over18 = False):
+    def random_reddit(cls, limit=2500, over18=False, user=None):
         srs = cls.top_lang_srs(c.content_langs, limit,
                                filter_allow_top = False,
                                over18 = over18,
                                over18_only = over18,
                                ids=True)
+        if user:
+            excludes = cls.user_subreddits(user, over18=over18, limit=None)
+            srs = list(set(srs) - set(excludes))
         return (Subreddit._byID(random.choice(srs))
                 if srs else Subreddit._by_name(g.default_sr))
 
@@ -873,6 +883,12 @@ class Subreddit(Thing, Printable):
             rel.update_permissions(**kwargs)
             rel._commit()
 
+    def add_rel_note(self, type, user, note):
+        rel = getattr(self, "get_%s" % type)(user)
+        if not rel:
+            raise ValueError("User is not %s." % type)
+        rel.note = note
+        rel._commit()
 
 class FakeSubreddit(Subreddit):
     over_18 = False
@@ -1046,9 +1062,7 @@ class AllMinus(AllSR):
         from r2.lib.db.operators import not_
         q = AllSR.get_links(self, sort, time)
         if c.user.gold:
-            excluded_ids = self.random_reddits(c.user.name, self.sr_ids,
-                                               self.gold_limit)
-            q._filter(not_(Link.c.sr_id.in_(excluded_ids)))
+            q._filter(not_(Link.c.sr_id.in_(self.sr_ids)))
         return q
 
 class _DefaultSR(FakeSubreddit):
@@ -1152,16 +1166,9 @@ class DefaultSR(_DefaultSR):
         return self._base.stylesheet_contents if self._base else ""
 
     @property
-    def sponsorship_url(self):
-        return self._base.sponsorship_url if self._base else ""
+    def stylesheet_hash(self):
+        return self._base.stylesheet_hash if self._base else ""
 
-    @property
-    def sponsorship_text(self):
-        return self._base.sponsorship_text if self._base else ""
-
-    @property
-    def sponsorship_img(self):
-        return self._base.sponsorship_img if self._base else ""
 
 class MultiReddit(_DefaultSR):
     name = 'multi'

@@ -16,13 +16,14 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
 <%!
    from r2.lib.filters import keep_space
    from r2.lib.pages import UserText
+   from r2.lib.strings import strings
 %>
 <%namespace file="utils.html" import="error_field, language_tool, plain_link"/>
 <%namespace file="utils.html" import="image_upload"/>
@@ -42,8 +43,7 @@
     <%utils:line_field title="${_('name')}"
                         description='${_("no spaces, e.g., slashdot")}'>
      <input type="text" name="name" id="name" class="text"
-            value="${thing.name}"
-            onchange="update_title(this)"/>
+            value="${thing.name}"/>
       %if not thing.site:
         ${error_field("SUBREDDIT_EXISTS", "name")}
         ${error_field("BAD_SR_NAME", "name")}
@@ -153,6 +153,24 @@
       </table>
       ${error_field("INVALID_OPTION", "link_type")}
     </div>
+    <div class="usertext-edit">
+      <div class="delete-field">
+        <label for="submit_link_label">${_('Custom label for submit link button (blank for default):')}</label>
+        <input id="submit_link_label" type="text" name="submit_link_label" maxlength="60" placeholder="${strings.submit_link_label}"
+            %if thing.site:
+                value="${thing.site.submit_link_label}"
+            %endif
+        >
+      </div>
+      <div class="delete-field">
+        <label for="submit_text_label">${_('Custom label for submit text post button (blank for default):')}</label>
+        <input id="submit_text_label" type="text" name="submit_text_label" maxlength="60" placeholder="${strings.submit_text_label}"
+            %if thing.site:
+                value="${thing.site.submit_text_label}"
+            %endif
+        >
+      </div>
+    </div>
   </%utils:line_field>
   <%utils:line_field title="${_('wiki')}">
     <div class="delete-field">
@@ -240,6 +258,18 @@
           </label>
         </li>
       </ul>
+    </div>
+    <div class="usertext-edit">
+      <div class="delete-field">
+        <label for="comment_score_hide_mins">${_('Minutes to hide comment scores:')}</label>
+            %if thing.site:
+                <input id="comment_score_hide_mins" type="text" name="comment_score_hide_mins" placeholder="0" 
+                       value = "${thing.site.comment_score_hide_mins}" />
+            %else:
+                <input id="comment_score_hide_mins" type="text" name="comment_score_hide_mins" value="0" placeholder="0" />
+            %endif
+            ${error_field("BAD_NUMBER", "comment_score_hide_mins")}
+      </div>
     </div>
   </%utils:line_field>
 
@@ -330,59 +360,6 @@
         </li>
       </ul>
     </%utils:line_field>
-
-  %if c.user_is_admin:
-    <%utils:line_field title="${_('sponsorship')}">
-      <ul class="upload">
-        <li>
-          <input type="text" name="sponsorship-text"
-                 value="${thing.site.sponsorship_text}"
-                 />
-        </li>
-        <li>
-          <input type="text" name="sponsorship-name"
-                 %if thing.site.sponsorship_name:
-                     value="${thing.site.sponsorship_name}"
-                 %else:
-                     placeholder="${_('name this campaign (for traffic)')}" 
-                 %endif
-                 />
-        </li>
-        <li>
-          <input type="text" name="sponsorship-url" 
-                 %if thing.site.sponsorship_url:
-                     value="${thing.site.sponsorship_url}"
-                 %else:
-                     placeholder="${_('enter link url here')}"
-                 %endif
-                 />
-        </li>
-        <li>
-          <%utils:image_upload post_target="/api/upload_sr_img" 
-                               current_image="${thing.site.sponsorship_img}"
-                               label="${_('upload sponsorship image')}"
-                               form_id="sponsor-upload",
-                               ask_type="${True}">
-            <br/>
-            <button id="delete-sponsor" class="delete-img"
-                   %if not thing.site.sponsorship_img:
-                      style="display: none;"
-                   %endif
-                   onclick="return post_form(this.form, 'delete_sr_header');">
-              ${_('delete')}
-            </button>
-            
-            <div class="clearleft"></div>
-            <input type="hidden" name="uh" value="${c.modhash}" />
-            <input type="hidden" name="r"  value="${c.site.name}" />
-            <input type="hidden" name="sponsor" value="1" />
-          </%utils:image_upload>
-        </li>
-      </ul>
-    </%utils:line_field>
-
-  %endif
-
 %endif
 
 

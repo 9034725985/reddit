@@ -16,56 +16,24 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
-<%namespace file="utils.html" import="percentage"/>
+<%namespace file="less.html" import="less_stylesheet"/>
+<%inherit file="reddit.html"/>
 
-<%def name="adsrline(adsr)">
-    <tr>
-      <td>
-        <a href="/r/${adsr._thing2.name}/about/ads#${thing.ad.codename}">
-          ${adsr._thing2.name}
-        </a>
-      </td>
-      <td style="text-align: right">
-        ${adsr.weight}
-      </td>
-      <td style="text-align: right">
-        ${percentage(adsr.weight, thing.sr_totals[adsr._thing2.name])}
-      </td>
-    </tr>
+<%def name="viewport()">
+<meta name="viewport" content="width=700, initial-scale=1">
 </%def>
 
-<div style="float: right">
-  <a href="${thing.ad.linkurl}">
-    <img src="${thing.ad.imgurl}"/>
-  </a>
-</div>
+<%def name="stylesheet()">
+  ${parent.stylesheet()}
+  ${less_stylesheet('policies.less')}
+</%def>
 
-<a href="/admin/ads/#${thing.ad.codename}">
-  <h1>${thing.ad.codename}</h1>
-</a>
-
-<table class="lined-table">
-  <tr>
-    <th>
-      community
-    </th>
-    <th>
-      wt
-    </th>
-    <th>
-      pct
-    </th>
-  </tr>
-  %for adsr in thing.adsrs:
-    ${adsrline(adsr)}
-  %endfor
-</table>
-
-<p>
-  <a href="/admin/ads">back to ads</a>
-</p>
-
+<%def name="javascript_bottom()">
+  ${parent.javascript_bottom()}
+  <% from r2.lib import js %>
+  ${unsafe(js.use('policies'))}
+</%def>

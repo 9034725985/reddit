@@ -17,7 +17,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -46,7 +46,7 @@ if not STATIC_ROOT:
 
 
 script_tag = '<script type="text/javascript" src="{src}"></script>\n'
-inline_script_tag = '<script type="text/javascript">{content}</script>\n'
+inline_script_tag = '<script type="text/javascript">{content}</script>'
 
 
 class ClosureError(Exception): pass
@@ -99,7 +99,8 @@ class FileSource(Source):
         self.name = name
 
     def get_source(self):
-        return open(self.path).read()
+        with open(self.path) as f:
+            return f.read()
 
     @property
     def path(self):
@@ -188,11 +189,32 @@ class DataSource(Source):
         return self.wrap.format(content=json_data) + "\n"
 
     def use(self):
-        return inline_script_tag.format(content=self.get_source())
+        from r2.lib.filters import SC_OFF, SC_ON
+        return (SC_OFF + inline_script_tag.format(content=self.get_source()) +
+                SC_ON + "\n")
 
     @property
     def dependencies(self):
         return []
+
+
+class TemplateFileSource(DataSource, FileSource):
+    """A JavaScript template file on disk."""
+    def __init__(self, name, wrap="r.templates.set({content})"):
+        DataSource.__init__(self, wrap)
+        FileSource.__init__(self, name)
+        self.name = name
+
+    def get_content(self):
+        from r2.lib.static import locate_static_file
+        name, style = os.path.splitext(self.name)
+        path = locate_static_file(os.path.join('static/js', self.name))
+        with open(path) as f:
+            return [{
+                "name": name,
+                "style": style.lstrip('.'),
+                "template": f.read()
+            }]
 
 
 class StringsSource(DataSource):
@@ -256,7 +278,8 @@ class LocalizedModule(Module):
     def build(self, closure):
         Module.build(self, closure)
 
-        reddit_source = open(self.path).read()
+        with open(self.path) as f:
+            reddit_source = f.read()
         string_keys = re.findall("r\.strings\(['\"]([\w$_]+)['\"]", reddit_source)
         string_keys.append("permissions")
 
@@ -328,9 +351,10 @@ module["html5shiv"] = Module("html5shiv.js",
 
 module["reddit-init"] = Module("reddit-init.js",
     "lib/json2.js",
-    "lib/underscore-1.3.3.js",
+    "lib/underscore-1.4.4.js",
     "lib/store.js",
     "base.js",
+    "preload.js",
     "uibase.js",
     "strings.js",
     "analytics.js",
@@ -342,6 +366,8 @@ module["reddit-init"] = Module("reddit-init.js",
 module["reddit"] = LocalizedModule("reddit.js",
     "lib/jquery.cookie.js",
     "lib/jquery.url.js",
+    "lib/backbone-1.0.0.js",
+    "templates.js",
     "utils.js",
     "ui.js",
     "login.js",
@@ -353,7 +379,8 @@ module["reddit"] = LocalizedModule("reddit.js",
 )
 
 module["admin"] = Module("admin.js",
-    "lib/backbone-0.9.10.js",
+    # include Backbone so it is available early to render admin bar fast.
+    "lib/backbone-1.0.0.js",
     "adminbar.js",
 )
 
@@ -368,6 +395,11 @@ module["button"] = Module("button.js",
     "lib/jquery.cookie.js",
     "jquery.reddit.js",
     "blogbutton.js"
+)
+
+
+module["policies"] = Module("policies.js",
+    "policies.js",
 )
 
 

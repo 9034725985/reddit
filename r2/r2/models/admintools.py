@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -24,7 +24,9 @@ from r2.lib.errors import MessageError
 from r2.lib.utils import tup, fetch_things2
 from r2.lib.filters import websafe
 from r2.lib.log import log_text
-from r2.models import Report, Account, Subreddit
+from r2.models import Account, Message, Report, Subreddit
+from r2.models.award import Award
+from r2.models.token import AwardClaimToken
 
 from _pylibmc import MemcachedError
 from pylons import g
@@ -193,6 +195,22 @@ class AdminTools(object):
     def admin_list(self):
         return list(g.admins)
 
+    def create_award_claim_code(self, unique_award_id, award_codename,
+                                description, url):
+        '''Create a one-time-use claim URL for a user to claim a trophy.
+
+        `unique_award_id` - A string that uniquely identifies the kind of
+                            Trophy the user would be claiming.
+                            See: token.py:AwardClaimToken.uid
+        `award_codename` - The codename of the Award the user will claim
+        `description` - The description the Trophy will receive
+        `url` - The URL the Trophy will receive
+
+        '''
+        award = Award._by_codename(award_codename)
+        token = AwardClaimToken._new(unique_award_id, award, description, url)
+        return token.confirm_url()
+
 admintools = AdminTools()
 
 def cancel_subscription(subscr_id):
@@ -271,7 +289,7 @@ def update_gold_users(verbose=False):
                     print "Sending notice to %s" % account.name
                 g.hardcache.set(hc_key, True, 86400 * 10)
                 send_system_message(account, "Your reddit gold subscription is about to expire!",
-                                    "Your subscription to reddit gold will be expiring soon. [Click here for details on how to renew, or to set up an automatically-renewing subscription.](http://www.reddit.com/gold) Or, if you think we suck, just let your subscription lapse and go back to being a regular user.\n\nIf you have any questions, please write to 912@reddit.com.")
+                                    "Your subscription to reddit gold will be expiring soon. [Click here for details on how to renew, or to set up an automatically-renewing subscription.](http://www.reddit.com/gold) Or, if you don't want to, please write to us at 912@reddit.com and tell us where we let you down, so we can work on fixing the problem.")
 
     if verbose:
         for exp_date in sorted(expiration_dates.keys()):
@@ -376,9 +394,6 @@ def filter_quotas(unfiltered):
         return baskets, new_quotas
     else:
         return baskets, None
-
-def check_request(end_time):
-    pass
 
 
 def send_system_message(user, subject, body):

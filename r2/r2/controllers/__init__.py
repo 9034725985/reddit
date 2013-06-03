@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -65,11 +65,11 @@ def load_controllers():
     from post import PostController
     from toolbar import ToolbarController
     from awards import AwardsController
-    from ads import AdsController
     from errorlog import ErrorlogController
     from promotecontroller import PromoteController
     from mediaembed import MediaembedController
     from mediaembed import AdController
+    from policies import PoliciesController
     
     from wiki import WikiController
     from wiki import WikiApiController

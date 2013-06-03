@@ -16,7 +16,7 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
@@ -28,7 +28,7 @@
    from r2.lib.wrapped import Templated
 %>
 
-<div id="siteTable_organic" class="organic-listing">
+<div id="siteTable_organic" class="organic-listing loading">
   %if thing.things:
     %for link in thing.things:
       ${unsafe(link.render(display=False))}
@@ -42,13 +42,14 @@
   %endif
 
   <div class="nextprev">
+    <div class="throbber"></div>
     <button class="arrow prev">${_("prev")}</button>
     <button class="arrow next">${_("next")}</button>
   </div>
 
   <div class="help help-hoverable">
     ${_("what's this?")}
-    <div id="spotlight-help" class="help-bubble">
+    <div id="spotlight-help" class="hover-bubble help-bubble anchor-top">
       <div class="help-section help-promoted">
         <p>
           ${text_with_links(
@@ -88,12 +89,12 @@
       </div>
     </div>
   </div>
-  <script>
-    r.spotlight.setup(
-      ${unsafe(json.dumps(thing.links))},
-      ${unsafe(json.dumps(thing.interestbar_prob))},
-      ${unsafe(json.dumps(thing.promotion_prob))}
-    )
-  </script>
 </div>
+<script>
+  r.spotlight.setup(
+    ${unsafe(json.dumps(thing.links))},
+    ${unsafe(json.dumps(thing.interestbar_prob))},
+    ${unsafe(json.dumps(thing.promotion_prob))}
+  )
+</script>
 

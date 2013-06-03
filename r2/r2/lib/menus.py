@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -27,7 +27,7 @@ from strings import StringHandler, plurals
 from r2.lib.db import operators
 import r2.lib.search as search
 from r2.lib.filters import _force_unicode
-from pylons.i18n import _
+from pylons.i18n import _, N_
 
 
 
@@ -145,7 +145,7 @@ menu =   MenuHandler(hot          = _('hot'),
                      ads          = _("ads"),
                      promoted     = _("promoted"),
                      reporters    = _("reporters"),
-                     reports      = _("reported links"),
+                     reports      = _("reports"),
                      reportedauth = _("reported authors"),
                      info         = _("info"),
                      share        = _("share"),
@@ -157,11 +157,13 @@ menu =   MenuHandler(hot          = _('hot'),
                      hidden       = _("hidden {toolbar}"),
                      deleted      = _("deleted"),
                      reported     = _("reported"),
+                     voting       = _("voting"),
 
                      promote        = _('self-serve advertising'),
                      new_promo      = _('create promotion'),
                      my_current_promos = _('my promoted links'),
                      current_promos = _('all promoted links'),
+                     all_promos     = _('all'),
                      future_promos  = _('unseen'),
                      roadblock      = _('roadblock'),
                      graph          = _('analytics'),
@@ -329,15 +331,23 @@ class OffsiteButton(NavButton):
         return [('path', self.path), ('title', self.title)]
 
 class SubredditButton(NavButton):
-    from r2.models.subreddit import Frontpage, Mod
+    from r2.models.subreddit import Frontpage, Mod, All, Random, RandomSubscription
+    # Translation is deferred (N_); must be done per-request,
+    # not at import/class definition time.
     # TRANSLATORS: This refers to /r/mod
-    name_overrides = {Mod: _("mod"),
+    name_overrides = {Mod: N_("mod"),
     # TRANSLATORS: This refers to the user's front page
-                      Frontpage: _("front")}
+                      Frontpage: N_("front"),
+                      All: N_("all"),
+                      Random: N_("random"),
+    # TRANSLATORS: Gold feature, "myrandom", a random subreddit from your subscriptions
+                      RandomSubscription: N_("myrandom")}
 
     def __init__(self, sr, **kw):
         self.path = sr.path
-        name = self.name_overrides.get(sr, sr.name)
+        name = self.name_overrides.get(sr)
+        # Run the name through deferred translation
+        name = _(name) if name else sr.name
         NavButton.__init__(self, name, sr.path, False,
                            isselected = (c.site == sr), **kw)
 

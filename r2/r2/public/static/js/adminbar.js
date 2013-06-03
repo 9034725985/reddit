@@ -1,5 +1,3 @@
-(function(Backbone) {
-
 r.adminbar = {}
 
 r.adminbar.AdminBar = Backbone.View.extend({
@@ -8,6 +6,7 @@ r.adminbar.AdminBar = Backbone.View.extend({
         'click .hide-button': 'toggleVisibility',
         'click .timings-button': 'toggleTimings',
         'click .expand-button': 'toggleFullTimings',
+        'click .timelines': 'toggleZoom',
         'click .admin-off': 'adminOff'
     },
 
@@ -15,6 +14,8 @@ r.adminbar.AdminBar = Backbone.View.extend({
         this.hidden = store.get('adminbar.hidden') == true
         this.showTimings = store.get('adminbar.timings.show') == true
         this.showFullTimings = store.get('adminbar.timings.full') == true
+        this.zoomTimings = store.get('adminbar.timings.zoom') != false
+        this.timingScale = store.get('adminbar.timings.scale') || 8.0
 
         this.serverTimingGraph = new r.adminbar.TimingBarGraph({
             collection: r.adminbar.timings,
@@ -48,17 +49,30 @@ r.adminbar.AdminBar = Backbone.View.extend({
         this.$('.timings-bar .expand-button')
             .text(this.showFullTimings ? '-' : '+')
 
+        this.$('.timelines').toggleClass('zoomed', this.zoomTimings)
+
         this.$el.parent().css('height', this.$el.outerHeight())
 
         if (r.adminbar.timings.isEmpty()) {
             return
         }
 
-        var bt = r.adminbar.browserTimings
+        var bt = r.adminbar.browserTimings,
+            browserEndBound = bt.endTime
+        if (!this.zoomTimings && (bt.endTime - bt.startTime) < this.timingScale) {
+            browserEndBound = bt.startTime + this.timingScale
+        }
+        this.browserTimingGraph.setBounds(bt.startTime, browserEndBound)
+
         if (this.showFullTimings && !bt.isEmpty()) {
-            this.serverTimingGraph.setBounds(bt.startTime, bt.endTime)
+            this.serverTimingGraph.setBounds(bt.startTime, browserEndBound)
         } else {
-            this.serverTimingGraph.setBounds()
+            var scaleStart = r.adminbar.timings.startTime,
+                scaleEnd = r.adminbar.timings.endTime
+            if (!this.zoomTimings && (scaleEnd - scaleStart) < this.timingScale) {
+                scaleEnd = scaleStart + this.timingScale
+            }
+            this.serverTimingGraph.setBounds(scaleStart, scaleEnd)
         }
 
         // if showing full times, avoid rendering until both timelines loaded
@@ -84,6 +98,12 @@ r.adminbar.AdminBar = Backbone.View.extend({
     toggleFullTimings: function(value) {
         this.showFullTimings = !this.showFullTimings
         store.set('adminbar.timings.full', this.showFullTimings)
+        this.render()
+    },
+
+    toggleZoom: function(value) {
+        this.zoomTimings = !this.zoomTimings
+        store.set('adminbar.timings.zoom', this.zoomTimings)
         this.render()
     }
 })
@@ -118,13 +138,16 @@ r.adminbar.TimingBarGraph = Backbone.View.extend({
                 return
             }
 
+            var eventDuration = (timing.get('end') - timing.get('start')).toFixed(2)
             eventsEl.append($('<li class="event">')
                 .addClass(keyParts[0])
                 .addClass(keyParts[1])
-                .attr('title', key)
+                .addClass(keyParts[2])
+                .attr('title', key + ': ' + eventDuration + 's')
                 .css({
                     left: pos(timing.get('start') - startBound) + '%',
-                    right: pos(endBound - timing.get('end')) + '%'
+                    right: pos(endBound - timing.get('end')) + '%',
+                    zIndex: 1000 - Math.min(800, Math.floor(timing.duration() * 100))
                 })
             )
         }, this)
@@ -142,11 +165,11 @@ r.adminbar.TimingBarGraph = Backbone.View.extend({
 
 r.adminbar.Timings = Backbone.Collection.extend({
     model: Backbone.Model.extend({
-        idAttribute: 'key',
         duration: function() {
             return this.get('end') - this.get('start')
         }
     }),
+    comparator: 'start',
 
     initialize: function() {
         this.on('reset', this.calculate, this)
@@ -211,5 +234,3 @@ $(function() {
         r.adminbar.browserTimings.fetch()
     }, 0)
 })
-
-})(Backbone.noConflict())

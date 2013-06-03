@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -55,6 +55,7 @@ api('account',       AccountJsonTemplate)
 api('organiclisting',       OrganicListingJsonTemplate)
 api('subreddittraffic', TrafficJsonTemplate)
 api('takedownpane', TakedownJsonTemplate)
+api('policyview', PolicyViewJsonTemplate)
 
 api('wikibasepage', WikiJsonTemplate)
 api('wikipagerevisions', WikiJsonTemplate)

@@ -19,52 +19,19 @@
 ## All portions of the code written by reddit are Copyright (c) 2006-2012
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
+<%!
+    from r2.lib.filters import safemarkdown
+%>
 
-<%namespace file="utils.html" import="error_field"/>
+<%namespace file="trophycase.html" import="trophy_info" />
 
-<form action="/post/assignad" method="post" class="pretty-form medium-text"
-      onsubmit="return post_form(this, 'assignad');">
+<form action="${thing.token.post_url()}" method="post"
+    class="centered confirm-award-claim">
 
-  <input type="hidden" name="fullname" value="${thing.ad._fullname}" />
+${unsafe(safemarkdown(_("# Claim this award for /u/%s? #") % thing.user))}
 
-  <table class="lined-table borderless">
-    <tr>
-      <td>
-        <img src="${thing.ad.imgurl}"/>
-      </td>
-      <td>
-        <a href="/admin/ads/#${thing.ad.codename}">
-          <h1 class="centered">${thing.ad.codename}</h1>
-        </a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        community
-      </td>
-      <td>
-        <input type="text" name="community" /><br/>
-        ${error_field("SUBREDDIT_REQUIRED", "community", "span")}
-        ${error_field("SUBREDDIT_NOEXIST", "community", "span")}
-      </td>
-    </tr>
-    <tr>
-      <td>
-        weight
-      </td>
-      <td>
-        <input type="text" name="weight" value="${thing.weight}" /><br/>
-        ${error_field("BAD_NUMBER", "weight", "span")}
-      </td>
-    </tr>
-  </table>
+${trophy_info(thing.trophy, False)}
 
-  <button class="btn" type="submit">assign</button>
+<button class="btn" type="submit">${_("Yes, please!")}</button>
 
-  <span class="status"></span>
-
-  <p>
-    <a href="/admin/ads">back to ads</a>
-  </p>
 </form>
-

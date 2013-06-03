@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -177,7 +177,7 @@ def normalize_page(page):
 class AbortWikiError(Exception):
     pass
 
-page_match_regex = re.compile(r'^[\w_/]+\Z')
+page_match_regex = re.compile(r'^[\w_\-/]+\Z')
 
 class VWikiModerator(VSrModerator):
     def __init__(self, fatal=False, *a, **kw):

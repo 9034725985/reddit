@@ -16,7 +16,7 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
@@ -34,7 +34,11 @@
 ##################
 
 <%def name="thing_data_attributes(what)" buffered="True">
-${parent.thing_data_attributes(what)} data-ups="${what.upvotes}" data-downs="${what.downvotes}"
+  %if what.score_hidden:
+    ${parent.thing_data_attributes(what)} data-ups="0" data-downs="0"
+  %else:
+    ${parent.thing_data_attributes(what)} data-ups="${what.upvotes}" data-downs="${what.downvotes}"
+  %endif
 </%def>
 
 <%def name="midcol(display=True, cls = '')">
@@ -105,8 +109,14 @@ ${parent.collapsed()}
   %if collapse and thing.collapsed and show:
     ${thing.collapsed_reason}
   %else:
-    %if show and not (thing.link.contest_mode and thing.score_hidden):
-       ${unsafe(self.score(thing, likes = thing.likes))}&#32;
+    %if show:
+      %if thing.score_hidden:
+        <span title="${_('this subreddit hides comment scores for %d minutes') % thing.subreddit.comment_score_hide_mins}">
+          [${_("score hidden")}]
+        </span>&#32;
+      %else:
+        ${unsafe(self.score(thing, likes = thing.likes))}&#32;
+      %endif
     %endif
     ${thing_timestamp(thing, thing.timesince)}&#32;${_("ago")}
     ${edited(thing, thing.lastedited)}

@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -61,7 +61,7 @@ def _gold_email(body, to_address, from_name, kind):
     Email.handler.add_to_queue(None, to_address, from_name, g.goldthanks_email,
                                kind, body = body)
 
-def verify_email(user, dest):
+def verify_email(user):
     """
     For verifying an email address
     """
@@ -71,8 +71,7 @@ def verify_email(user, dest):
     Award.take_away("verified_email", user)
 
     token = EmailVerificationToken._new(user)
-    emaillink = ('http://' + g.domain + '/verification/' + token._id
-                 + query_string(dict(dest=dest)))
+    emaillink = 'http://' + g.domain + '/verification/' + token._id
     g.log.debug("Generated email verification link: " + emaillink)
 
     _system_email(user.email,

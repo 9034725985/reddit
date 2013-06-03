@@ -19,20 +19,16 @@
 ## All portions of the code written by reddit are Copyright (c) 2006-2012
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
+<%namespace file="trophycase.html" import="trophy_info" />
 
-<h1>Add or remove approved traffic viewers</h1>
-<div class="promo-traffic-settings">
-    <div class="promo-traffic-settings-instructions">
-      ${_("Traffic url for link %s" % thing.thing._id36)}:
-      <a href="${thing.traffic_url}">${thing.traffic_url}</a>
-    </div>
-    <div class="promo-traffic-settings-instructions">
-      ${_("You can share this traffic page with other reddit users by " +
-          "adding them to the viewer list below and then sharing the " +
-          "traffic url with them. They will be able to see this stats " +
-          "page but will not be able to edit the promotion.")}
-    </div>
-    <div>
-      ${thing.viewer_list}
-    </div>
+
+<div class="centered">
+%if thing.preexisting:
+  <h1>${_("you already have that trophy!")}</h1>
+%else:
+  <h1>${_("trophy claimed!")}</h1>
+%endif
+
+${trophy_info(thing.trophy, False)}
+
 </div>

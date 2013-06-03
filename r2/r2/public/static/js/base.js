@@ -6,7 +6,9 @@ r.setup = function(config) {
     reddit = config
 
     _.each(['debug', 'warn', 'error'], function(name) {
-        r[name] = config.debug && window.console && console[name]
+        // suppress debug messages unless config.debug is set
+        r[name] = (name != 'debug' || config.debug)
+                && window.console && console[name]
                 ? _.bind(console[name], console)
                 : function() {}
     })
@@ -15,11 +17,24 @@ r.setup = function(config) {
     r.analytics.breadcrumbs.init()
 }
 
+r.setupBackbone = function() {
+    Backbone.ajax = function(request) {
+        var preloaded = r.preload.read(request.url)
+        if (preloaded != null) {
+            request.success(preloaded)
+            return
+        }
+
+        return Backbone.$.ajax(request)
+    }
+}
+
 $(function() {
+    r.setupBackbone()
+
     r.login.ui.init()
     r.analytics.init()
     r.ui.init()
-    r.spotlight.init()
     r.interestbar.init()
     r.apps.init()
     r.wiki.init()

@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -55,7 +55,7 @@ class Plugin(object):
     def static_dir(self):
         return os.path.join(self.path, 'public')
 
-    def on_load(self):
+    def on_load(self, g):
         pass
 
     def add_js(self, module_registry=None):
@@ -78,8 +78,6 @@ class Plugin(object):
     def load_controllers(self):
         pass
 
-    def on_thing_commit(self, thing, changes):
-        pass
 
 
 class PluginLoader(object):
@@ -100,7 +98,16 @@ class PluginLoader(object):
 
         self.plugins = OrderedDict()
         for entry_point in entry_points:
-            plugin_cls = entry_point.load()
+            try:
+                plugin_cls = entry_point.load()
+            except Exception as e:
+                if plugin_names:
+                    # if this plugin was specifically requested, fail.
+                    raise e
+                else:
+                    print >> sys.stderr, ("Error loading plugin %s (%s)."
+                                          " Skipping." % (entry_point.name, e))
+                    continue
             self.plugins[entry_point.name] = plugin_cls(entry_point)
 
     def __len__(self):
@@ -135,12 +142,8 @@ class PluginLoader(object):
             g.config.add_spec(plugin.config)
             config['pylons.paths']['templates'].insert(0, plugin.template_dir)
             plugin.add_js()
-            plugin.on_load()
+            plugin.on_load(g)
 
     def load_controllers(self):
         for plugin in self:
             plugin.load_controllers()
-
-    def on_thing_commit(self, thing, changes):
-        for plugin in self:
-            plugin.on_thing_commit(thing, changes)

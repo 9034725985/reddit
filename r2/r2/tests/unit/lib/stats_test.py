@@ -1,4 +1,25 @@
 #!/usr/bin/env python
+# The contents of this file are subject to the Common Public Attribution
+# License Version 1.0. (the "License"); you may not use this file except in
+# compliance with the License. You may obtain a copy of the License at
+# http://code.reddit.com/LICENSE. The License is based on the Mozilla Public
+# License Version 1.1, but Sections 14 and 15 have been added to cover use of
+# software over a computer network and provide for limited attribution for the
+# Original Developer. In addition, Exhibit A has been modified to be consistent
+# with Exhibit B.
+#
+# Software distributed under the License is distributed on an "AS IS" basis,
+# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License for
+# the specific language governing rights and limitations under the License.
+#
+# The Original Code is reddit.
+#
+# The Original Developer is the Initial Developer.  The Initial Developer of
+# the Original Code is reddit Inc.
+#
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
+# Inc. All Rights Reserved.
+###############################################################################
 
 import unittest
 
@@ -11,7 +32,7 @@ class TimingStatBufferTest(unittest.TestCase):
 
         for i in xrange(1, 4):
             for j in xrange(i):
-                tsb.record(str(i), 0.1 * (j + 1))
+                tsb.record(str(i), 0, 0.1 * (j + 1))
         self.assertEquals(
             set([('1', '1|c'),
                  ('1', '100.0|ms'),
@@ -34,6 +55,29 @@ class CountingStatBufferTest(unittest.TestCase):
                  ('2', '3|c'),
                  ('3', '6|c')]),
             set(csb.flush()))
+
+class StringCountBufferTest(unittest.TestCase):
+    def test_encode_string(self):
+        enc = stats.StringCountBuffer._encode_string
+        self.assertEquals('test', enc('test'))
+        self.assertEquals('\\n\\&\\\\&', enc('\n|\\&'))
+
+    def test_scb(self):
+        scb = stats.StringCountBuffer()
+        self.assertEquals([], list(scb.flush()))
+
+        for i in xrange(1, 4):
+            for j in xrange(i):
+                for k in xrange(j + 1):
+                    scb.record(str(i), str(j))
+        self.assertEquals(
+            set([('1', '1|s|0'),
+                 ('2', '1|s|0'),
+                 ('2', '2|s|1'),
+                 ('3', '1|s|0'),
+                 ('3', '2|s|1'),
+                 ('3', '3|s|2')]),
+            set(scb.flush()))
 
 class FakeUdpSocket:
     def __init__(self, *ignored_args):
@@ -93,7 +137,7 @@ class StatsdClientUnderTest(stats.StatsdClient):
 class StatsdClientTest(unittest.TestCase):
     def test_flush(self):
         client = StatsdClientUnderTest('host:1000')
-        client.timing_stats.record('t', 1)
+        client.timing_stats.record('t', 0, 1)
         client.counting_stats.record('c', 1)
         client.flush()
         self.assertEquals(
@@ -141,7 +185,7 @@ class CounterAndTimerTest(unittest.TestCase):
 
         self.assertRaises(AssertionError, t.intermediate, 'fail')
         self.assertRaises(AssertionError, t.stop)
-        t.send('x', 0.5)
+        t.send('x', 0, 0.5)
 
         self.assertEquals(
             set([('t.a', '1|c'),

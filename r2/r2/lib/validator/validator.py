@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -57,7 +57,7 @@ def visible_promo(article):
     # subreddit discovery links are visible even without a live campaign
     if article._fullname in g.live_config['sr_discovery_links']:
         return True
-    
+
     # promos are visible only if comments are not disabled and the
     # user is either the author or the link is live/previously live.
     if is_promo:
@@ -159,11 +159,13 @@ def _make_validated_kw(fn, simple_vals, param_vals, env):
         kw[var] = validator(env)
     return kw
 
-def set_api_docs(fn, simple_vals, param_vals):
+def set_api_docs(fn, simple_vals, param_vals, extra_vals=None):
     doc = fn._api_doc = getattr(fn, '_api_doc', {})
     param_info = doc.get('parameters', {})
     for validator in chain(simple_vals, param_vals.itervalues()):
         param_info.update(validator.param_docs())
+    if extra_vals:
+        param_info.update(extra_vals)
     doc['parameters'] = param_info
 
 
@@ -195,7 +197,7 @@ def validate(*simple_vals, **param_vals):
     return val
 
 
-def api_validate(response_type=None):
+def api_validate(response_type=None, add_api_type_doc=False):
     """
     Factory for making validators for API calls, since API calls come
     in two flavors: responsive and unresponsive.  The machinary
@@ -237,7 +239,13 @@ def api_validate(response_type=None):
                         responder.send_failure(errors.VERIFIED_USER_REQUIRED)
                         return self.api_wrapper(responder.make_response())
 
-                set_api_docs(newfn, simple_vals, param_vals)
+                extra_param_vals = {}
+                if add_api_type_doc:
+                    extra_param_vals = {
+                        "api_type": "the string `json`",
+                    }
+
+                set_api_docs(newfn, simple_vals, param_vals, extra_param_vals)
                 return newfn
             return val
         return _api_validate
@@ -277,7 +285,8 @@ def _validatedForm(self, self_method, responder, simple_vals, param_vals,
     # add data to the output on some errors
     for validator in simple_vals:
         if (isinstance(validator, VCaptcha) and
-            form.has_errors('captcha', errors.BAD_CAPTCHA)):
+            (form.has_errors('captcha', errors.BAD_CAPTCHA) or
+             (form.has_error() and c.user.needs_captcha()))):
             form.new_captcha()
         elif (isinstance(validator, VRatelimit) and
               form.has_errors('ratelimit', errors.RATELIMIT)):
@@ -288,13 +297,13 @@ def _validatedForm(self, self_method, responder, simple_vals, param_vals,
     else:
         return self.api_wrapper(responder.make_response())
 
-@api_validate("html")
+@api_validate("html", add_api_type_doc=True)
 def validatedForm(self, self_method, responder, simple_vals, param_vals,
                   *a, **kw):
     return _validatedForm(self, self_method, responder, simple_vals, param_vals,
                           *a, **kw)
 
-@api_validate("html")
+@api_validate("html", add_api_type_doc=True)
 def validatedMultipartForm(self, self_method, responder, simple_vals,
                            param_vals, *a, **kw):
     def wrapped_self_method(*a, **kw):
@@ -402,24 +411,6 @@ class VCommentByID(VThing):
     def __init__(self, param, redirect = True, *a, **kw):
         VThing.__init__(self, param, Comment, redirect=redirect, *a, **kw)
 
-class VAd(VThing):
-    def __init__(self, param, redirect = True, *a, **kw):
-        VThing.__init__(self, param, Ad, redirect=redirect, *a, **kw)
-
-class VAdByCodename(Validator):
-    def run(self, codename, required_fullname=None):
-        if not codename:
-            return self.set_error(errors.NO_TEXT)
-
-        try:
-            a = Ad._by_codename(codename)
-        except NotFound:
-            a = None
-
-        if a and required_fullname and a._fullname != required_fullname:
-            return self.set_error(errors.INVALID_OPTION)
-        else:
-            return a
 
 class VAward(VThing):
     def __init__(self, param, redirect = True, *a, **kw):
@@ -670,7 +661,7 @@ def fullname_regex(thing_cls = None, multiple = False):
     return re.compile(r"\A" + pattern + r"\Z")
 
 class VByName(Validator):
-    # Lookup tdb_sql.Thing or tdb_cassandra.Thing objects by fullname. 
+    # Lookup tdb_sql.Thing or tdb_cassandra.Thing objects by fullname.
     splitter = re.compile('[ ,]+')
     def __init__(self, param, thing_cls=None, multiple=False, limit=None,
                  error=errors.NO_THING_ID, backend='sql', **kw):
@@ -685,7 +676,7 @@ class VByName(Validator):
         self.backend = backend
 
         Validator.__init__(self, param, **kw)
-    
+
     def run(self, items):
         if self.backend == 'cassandra':
             # tdb_cassandra.Thing objects can't use the regex
@@ -693,7 +684,7 @@ class VByName(Validator):
                 items = [item for item in self.splitter.split(items)]
                 if self.limit and len(items) > self.limit:
                     return self.set_error(errors.TOO_MANY_THING_IDS)
-            if items:                        
+            if items:
                 try:
                     return tdb_cassandra.Thing._by_fullname(items, return_dict=False)
                 except NotFound:
@@ -716,7 +707,7 @@ class VByName(Validator):
     def param_docs(self):
         thingtype = (self.thing_cls or Thing).__name__.lower()
         return {
-            self.param: "fullname of a %s" % thingtype,
+            self.param: "[fullname](#fullnames) of a %s" % thingtype,
         }
 
 class VByNameIfAuthor(VByName):
@@ -730,12 +721,12 @@ class VByNameIfAuthor(VByName):
 
     def param_docs(self):
         return {
-            self.param: "fullname of a thing created by the user",
+            self.param: "[fullname](#fullnames) of a thing created by the user",
         }
 
 class VCaptcha(Validator):
     default_param = ('iden', 'captcha')
-    
+
     def run(self, iden, solution):
         if c.user.needs_captcha():
             valid_captcha = captcha.valid_solution(iden, solution)
@@ -771,7 +762,7 @@ class VModhash(Validator):
 
     def param_docs(self):
         return {
-            self.param: 'a modhash',
+            self.param: 'a [modhash](#modhashes)',
         }
 
 class VVotehash(Validator):
@@ -834,7 +825,7 @@ class VSponsor(VVerifiedUser):
 
     def run(self, link_id=None, campaign_id=None):
         assert not (link_id and campaign_id), 'Pass link or campaign, not both'
-          
+
         VVerifiedUser.run(self)
         if c.user_is_sponsor:
             return
@@ -960,6 +951,14 @@ class VSubmitParent(VByName):
                         self.set_error(errors.DELETED_LINK)
                     else:
                         self.set_error(errors.DELETED_COMMENT)
+                if parent._spam and isinstance(parent, Comment):
+                    # Only author, mod or admin can reply to removed comments
+                    can_reply = (c.user_is_loggedin and
+                                 (parent.author_id == c.user._id or
+                                  c.user_is_admin or
+                                  parent.subreddit_slow.is_moderator(c.user)))
+                    if not can_reply:
+                        self.set_error(errors.DELETED_COMMENT)
             if isinstance(parent, Message):
                 return parent
             else:
@@ -973,7 +972,7 @@ class VSubmitParent(VByName):
 
     def param_docs(self):
         return {
-            self.param[0]: "fullname of parent thing",
+            self.param[0]: "[fullname](#fullnames) of parent thing",
         }
 
 class VSubmitSR(Validator):
@@ -1022,7 +1021,7 @@ class VSubmitSR(Validator):
 
 class VSubscribeSR(VByName):
     def __init__(self, srid_param, srname_param):
-        VByName.__init__(self, (srid_param, srname_param)) 
+        VByName.__init__(self, (srid_param, srname_param))
 
     def run(self, sr_id, sr_name):
         if sr_id:
@@ -1119,7 +1118,7 @@ class VThrottledLogin(VLogin):
         VLogin.__init__(self, *args, **kwargs)
         self.vdelay = VDelay("login")
         self.vlength = VLength("user", max_length=100)
-        
+
     def run(self, username, password):
         if username:
             username = username.strip()
@@ -1563,28 +1562,20 @@ class VImageType(Validator):
             return 'png'
         return img_type
 
-class VSubredditSponsorship(VInt):
-    max = 1
-    min = 0
-    def run(self, val):
-        s = super(VSubredditSponsorship, self).run(val)
-        if s and not c.user_is_admin:
-            abort(403, "forbidden")
-        return s
 
 class ValidEmails(Validator):
     """Validates a list of email addresses passed in as a string and
     delineated by whitespace, ',' or ';'.  Also validates quantity of
     provided emails.  Returns a list of valid email addresses on
     success"""
-    
+
     separator = re.compile(r'[^\s,;]+')
     email_re  = re.compile(r'.+@.+\..+')
 
     def __init__(self, param, num = 20, **kw):
         self.num = num
         Validator.__init__(self, param = param, **kw)
-        
+
     def run(self, emails0):
         emails = set(self.separator.findall(emails0) if emails0 else [])
         failures = set(e for e in emails if not self.email_re.match(e))
@@ -1615,32 +1606,32 @@ class ValidEmails(Validator):
 class ValidEmailsOrExistingUnames(Validator):
     """Validates a list of mixed email addresses and usernames passed in
     as a string, delineated by whitespace, ',' or ';'.  Validates total
-    quantity too while we're at it.  Returns a tuple of the form 
+    quantity too while we're at it.  Returns a tuple of the form
     (e-mail addresses, user account objects)"""
-    
+
     def __init__(self, param, num=20, **kw):
         self.num = num
         Validator.__init__(self, param=param, **kw)
-        
+
     def run(self, items):
         # Use ValidEmails separator to break the list up
         everything = set(ValidEmails.separator.findall(items) if items else [])
-        
+
         # Use ValidEmails regex to divide the list into e-mail and other
         emails = set(e for e in everything if ValidEmails.email_re.match(e))
         failures = everything - emails
-        
+
         # Run the rest of the validator against the e-mails list
         ve = ValidEmails(self.param, self.num)
         if len(emails) > 0:
             ve.run(", ".join(emails))
-        
+
         # ValidEmails will add to c.errors for us, so do nothing if that fails
         # Elsewise, on with the users
         if not ve.has_errors:
             users = set()  # set of accounts
             validusers = set()  # set of usernames to subtract from failures
-            
+
             # Now steal from VExistingUname:
             for uname in failures:
                 check = uname
@@ -1651,7 +1642,7 @@ class ValidEmailsOrExistingUnames(Validator):
                 if account:
                     validusers.add(uname)
                     users.add(account)
-            
+
             # We're fine if all our failures turned out to be valid users
             if len(users) == len(failures):
                 # ValidEmails checked to see if there were too many addresses,
@@ -1661,17 +1652,17 @@ class ValidEmailsOrExistingUnames(Validator):
                     if self.num == 1:
                         # We only wanted one, and we got it as an e-mail,
                         # so complain.
-                        self.set_error(errors.BAD_EMAILS, 
+                        self.set_error(errors.BAD_EMAILS,
                                        {"emails": '"%s"' % items})
                     else:
                         # Too many total
-                        self.set_error(errors.TOO_MANY_EMAILS, 
-                                       {"num": self.num}) 
+                        self.set_error(errors.TOO_MANY_EMAILS,
+                                       {"num": self.num})
                 elif len(users) + len(emails) == 0:
                     self.set_error(errors.NO_EMAILS)
                 else:
                     # It's all good!
-                    return (emails, users)                       
+                    return (emails, users)
             else:
                 failures = failures - validusers
                 self.set_error(errors.BAD_EMAILS,
@@ -1715,11 +1706,11 @@ class VDate(Validator):
     Error conditions:
        * BAD_DATE on mal-formed date strings (strptime parse failure)
        * BAD_FUTURE_DATE and BAD_PAST_DATE on respective range errors.
-    
+
     """
     def __init__(self, param, future=None, past = None,
                  sponsor_override = False,
-                 reference_date = lambda : datetime.now(g.tz), 
+                 reference_date = lambda : datetime.now(g.tz),
                  business_days = False,
                  format = "%m/%d/%Y"):
         self.future = future
@@ -1800,15 +1791,14 @@ class VDateRange(VDate):
 
 class VDestination(Validator):
     def __init__(self, param = 'dest', default = "", **kw):
-        self.default = default
-        Validator.__init__(self, param, **kw)
+        Validator.__init__(self, param, default, **kw)
 
     def run(self, dest):
         if not dest:
-            dest = request.referer or self.default or "/"
+            dest = self.default or "/"
 
         ld = dest.lower()
-        if ld.startswith(('/', 'http://', 'http://')):
+        if ld.startswith(('/', 'http://', 'https://')):
             u = UrlParser(dest)
 
             if u.is_reddit_url(c.site):
@@ -1848,9 +1838,9 @@ class ValidAddress(Validator):
             self.set_error(_("please provide a last name"), "lastName")
         elif not address:
             self.set_error(_("please provide an address"), "address")
-        elif not city: 
+        elif not city:
             self.set_error(_("please provide your city"), "city")
-        elif not state: 
+        elif not state:
             self.set_error(_("please provide your state"), "state")
         elif not zipCode:
             self.set_error(_("please provide your zip or post code"), "zip")
@@ -1877,7 +1867,7 @@ class ValidAddress(Validator):
             if arg and len(arg) > max_length:
                 self.set_error(_("max length %d characters" % max_length), form_field_name)
 
-        if not self.has_errors: 
+        if not self.has_errors:
             return Address(firstName = firstName,
                            lastName = lastName,
                            company = company or "",
@@ -1901,7 +1891,7 @@ class ValidCard(Validator):
             self.set_error(_("credit card numbers should be 13 to 16 digits"),
                            "cardNumber")
             has_errors = True
-        
+
         if not self.valid_date.match(expirationDate or ""):
             self.set_error(_("dates should be YYYY-MM"), "expirationDate")
             has_errors = True

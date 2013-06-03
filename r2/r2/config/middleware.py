@@ -16,11 +16,12 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
 """Pylons middleware initialization"""
+import importlib
 import re
 import urllib
 import tempfile
@@ -56,11 +57,22 @@ webob.util.status_reasons[429] = HTTPTooManyRequests.title
 
 #from pylons.middleware import error_mapper
 def error_mapper(code, message, environ, global_conf=None, **kw):
-    from pylons import c
     if environ.get('pylons.error_call'):
         return None
     else:
         environ['pylons.error_call'] = True
+
+    from pylons import c
+
+    # c is not always registered with the paste registry by the time we get to
+    # this error_mapper. if it's not, we can safely assume that we didn't use
+    # the pagecache. one such case where this happens is the
+    # DomainMiddleware-based srname.reddit.com -> reddit.com/r/srname redirect.
+    try:
+        if c.used_cache:
+            return
+    except TypeError:
+        pass
 
     if global_conf is None:
         global_conf = {}
@@ -363,22 +375,29 @@ class RedditApp(PylonsApp):
         self._loading_lock = Lock()
         self._controllers = None
 
-    def load_controllers(self):
-        with self._loading_lock:
-            if not self._controllers:
-                controllers = __import__(self.package_name + '.controllers').controllers
-                controllers.load_controllers()
-                config['r2.plugins'].load_controllers()
-                self._controllers = controllers
+    def setup_app_env(self, environ, start_response):
+        PylonsApp.setup_app_env(self, environ, start_response)
+        self.load_controllers()
 
-        return self._controllers
+    def load_controllers(self):
+        if self._controllers:
+            return
+
+        with self._loading_lock:
+            if self._controllers:
+                return
+
+            controllers = importlib.import_module(self.package_name +
+                                                  '.controllers')
+            controllers.load_controllers()
+            config['r2.plugins'].load_controllers()
+            self._controllers = controllers
 
     def find_controller(self, controller_name):
         if controller_name in self.controller_classes:
             return self.controller_classes[controller_name]
 
-        controllers = self.load_controllers()
-        controller_cls = controllers.get_controller(controller_name)
+        controller_cls = self._controllers.get_controller(controller_name)
         self.controller_classes[controller_name] = controller_cls
         return controller_cls
 

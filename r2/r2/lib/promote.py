@@ -16,14 +16,15 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
 from __future__ import with_statement
 
-from collections import OrderedDict, namedtuple
+from collections import defaultdict, OrderedDict, namedtuple
 from datetime import datetime, timedelta
+import itertools
 import json
 import math
 import random
@@ -578,26 +579,23 @@ def get_scheduled(offset=0):
     Arguments:
       offset - number of days after today you want the schedule for
     Returns:
-      {'by_sr': dict, 'links':set(), 'error_campaigns':[]}
-      -by_sr maps sr names to lists of (Link, bid, campaign_fullname) tuples
-      -links is the set of promoted Link objects used in the schedule
+      {'adweights':[], 'error_campaigns':[]}
+      -adweights is a list of Adweight objects used in the schedule
       -error_campaigns is a list of (campaign_id, error_msg) tuples if any 
         exceptions were raised or an empty list if there were none
       Note: campaigns in error_campaigns will not be included in by_sr
 
     """
-    by_sr = {}
+    adweights = []
     error_campaigns = []
-    links = set()
     for l, campaign, weight in accepted_campaigns(offset=offset):
         try:
             if authorize.is_charged_transaction(campaign.trans_id, campaign._id):
                 adweight = AdWeight(l._fullname, weight, campaign._fullname)
-                by_sr.setdefault(campaign.sr_name, []).append(adweight)
-                links.add(l)
+                adweights.append(adweight)
         except Exception, e: # could happen if campaign things have corrupt data
             error_campaigns.append((campaign._id, e))
-    return by_sr, links, error_campaigns
+    return adweights, error_campaigns
 
 def fuzz_impressions(imps):
     """Return imps rounded to one significant digit."""
@@ -720,57 +718,61 @@ def make_daily_promotions(offset=0, test=False):
       test - if True, new schedule will be generated but not launched
     Raises Exception with list of campaigns that had errors if there were any
     """
-    by_srname, links, error_campaigns = get_scheduled(offset)
-    all_links = set([l._fullname for l in links])
-    srs = Subreddit._by_name(by_srname.keys())
 
-    # over18 check
-    for srname, adweights in by_srname.iteritems():
-        if srname:
-            sr = srs[srname]
-            if sr.over_18:
-                sr_links = Link._by_fullname([a.link for a in adweights],
-                                             return_dict=False)
-                for l in sr_links:
-                    l.over_18 = True
-                    if not test:
-                        l._commit()
+    scheduled_adweights, error_campaigns = get_scheduled(offset)
+    current_adweights_byid = get_live_promotions([LiveAdWeights.ALL_ADS])
+    current_adweights = current_adweights_byid[LiveAdWeights.ALL_ADS]
 
-    old_ads = get_live_promotions([LiveAdWeights.ALL_ADS])
-    old_links = set(x.link for x in old_ads[LiveAdWeights.ALL_ADS])
+    link_names = [aw.link for aw in itertools.chain(scheduled_adweights,
+                                                    current_adweights)]
+    links = Link._by_fullname(link_names, data=True)
 
-    # links that need to be promoted
-    new_links = all_links - old_links
-    # links that have already been promoted
-    old_links = old_links - all_links
+    camp_names = [aw.campaign for aw in itertools.chain(scheduled_adweights,
+                                                        current_adweights)]
+    campaigns = PromoCampaign._by_fullname(camp_names, data=True)
+    srs = Subreddit._by_name([camp.sr_name for camp in campaigns.itervalues()
+                              if camp.sr_name])
 
-    links = Link._by_fullname(new_links.union(old_links), data=True,
-                              return_dict=True)
-
-    for l in old_links:
-        if is_promoted(links[l]):
+    expired_links = ({aw.link for aw in current_adweights} -
+                     {aw.link for aw in scheduled_adweights})
+    for link_name in expired_links:
+        link = links[link_name]
+        if is_promoted(link):
             if test:
-                print "unpromote", l
+                print "unpromote", link_name
             else:
                 # update the query queue
-                set_promote_status(links[l], PROMOTE_STATUS.finished)
-                emailer.finished_promo(links[l])
+                set_promote_status(link, PROMOTE_STATUS.finished)
+                emailer.finished_promo(link)
 
-    for l in new_links:
-        if is_accepted(links[l]):
+    by_srid = defaultdict(list)
+    for adweight in scheduled_adweights:
+        link = links[adweight.link]
+        campaign = campaigns[adweight.campaign]
+        if campaign.sr_name:
+            sr = srs[campaign.sr_name]
+            sr_id = sr._id
+            sr_over_18 = sr.over_18
+        else:
+            sr_id = ''
+            sr_over_18 = False
+
+        if sr_over_18:
             if test:
-                print "promote2", l
+                print "over18", link._fullname
+            else:
+                link.over_18 = True
+                link._commit()
+
+        if is_accepted(link) and not is_promoted(link):
+            if test:
+                print "promote2", link._fullname
             else:
                 # update the query queue
-                set_promote_status(links[l], PROMOTE_STATUS.promoted)
-                emailer.live_promo(links[l])
+                set_promote_status(link, PROMOTE_STATUS.promoted)
+                emailer.live_promo(link)
 
-    # convert the weighted dict to use sr_ids which are more useful
-    by_srid = {srs[srname]._id: adweights for srname, adweights
-                                          in by_srname.iteritems()
-                                          if srname != ''}
-    if '' in by_srname:
-        by_srid[''] = by_srname['']
+        by_srid[sr_id].append(adweight)
 
     if not test:
         set_live_promotions(by_srid)
@@ -802,7 +804,6 @@ def get_promotion_list(user, site):
     return [PromoTuple(*t) for t in tuples]
 
 
-@memoize('promotion_list', time=60)
 def get_promotion_list_cached(sites):
     weights = get_live_promotions(sites)
     if not weights:
@@ -824,7 +825,7 @@ def get_promotion_list_cached(sites):
 def lottery_promoted_links(user, site, n=10):
     """Run weighted_lottery to order and choose a subset of promoted links."""
     promo_tuples = get_promotion_list(user, site)
-    weights = {p: p.weight for p in promo_tuples}
+    weights = {p: p.weight for p in promo_tuples if p.weight}
     selected = []
     while weights and len(selected) < n:
         s = weighted_lottery(weights)
@@ -842,15 +843,18 @@ def sample_promoted_links(user, site, n=10):
         return random.sample(promo_tuples, n)
 
 
-def get_total_run(link):
-    """Return the total time span this promotion has run for.
+def get_total_run(thing):
+    """Return the total time span this link or campaign will run.
 
     Starts at the start date of the earliest campaign and goes to the end date
     of the latest campaign.
 
     """
 
-    campaigns = PromoCampaign._by_link(link._id)
+    if isinstance(thing, Link):
+        campaigns = PromoCampaign._by_link(thing._id)
+    elif isinstance(thing, PromoCampaign):
+        campaigns = [thing]
 
     earliest = None
     latest = None
@@ -870,8 +874,8 @@ def get_total_run(link):
         earliest = latest - timedelta(days=30)  # last month
 
     # ugh this stuff is a mess. they're stored as "UTC" but actually mean UTC-5.
-    earliest = earliest.replace(tzinfo=None) - timezone_offset
-    latest = latest.replace(tzinfo=None) - timezone_offset
+    earliest = earliest.replace(tzinfo=g.tz) - timezone_offset
+    latest = latest.replace(tzinfo=g.tz) - timezone_offset
 
     return earliest, latest
 

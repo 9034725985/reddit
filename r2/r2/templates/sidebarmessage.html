@@ -16,29 +16,16 @@
 ## The Original Developer is the Initial Developer.  The Initial Developer of
 ## the Original Code is reddit Inc.
 ##
-## All portions of the code written by reddit are Copyright (c) 2006-2012
+## All portions of the code written by reddit are Copyright (c) 2006-2013
 ## reddit Inc. All Rights Reserved.
 ###############################################################################
 
 <%!
-    from pylons import g
-    from r2.lib.strings import strings
-    from r2.lib.filters import safemarkdown
-    from r2.lib.template_helpers import format_number, js_timestamp, html_datetime
+   from r2.lib.filters import safemarkdown
 %>
 
-<div class="promo-traffic-help">
-    <p>
-      ${_("Please note that these traffic totals will lag behind by two to " +
-          "three hours, and that daily totals will be preliminary until 24 " +
-          "hours after the link has finished its run.")}
-    </p>
-    <p>
-      ${_("Campaigns created before Sept 12, 2012 will not be included in " +
-          "these totals.")}
-    </p>
-    <p>
-      ${_("Questions? Email self serve support:")}
-      <a href="mailto:${g.selfserve_support_email}">${g.selfserve_support_email}</a>
-    </p>
+<%namespace file="utils.html" import="classes"/>
+
+<div ${classes('side-message', thing.extra_class)}>
+  ${unsafe(safemarkdown(thing.message))}
 </div>

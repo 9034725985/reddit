@@ -24,7 +24,10 @@ r.ui.init = function() {
         $('body > .content > :not(.infobar):first').before(infobar)
     }
 
-    r.ui.HelpBubble.init()
+    $('.help-bubble').each(function(idx, el) {
+        $(el).data('HelpBubble', new r.ui.Bubble({el: el}))
+    })
+
     r.ui.PermissionEditor.init()
 }
 
@@ -131,44 +134,138 @@ r.ui.Form.prototype = $.extend(new r.ui.Base(), {
     }
 })
 
-r.ui.HelpBubble = function(el) {
-    r.ui.Base.call(this, el)
-    this.$el.hover($.proxy(this, 'queueShow'), $.proxy(this, 'queueHide'))
-    this.$parent = this.$el.parent()
-    this.$parent.hover($.proxy(this, 'queueShow'), $.proxy(this, 'queueHide'))
-    this.$parent.click($.proxy(this, 'queueShow'))
-}
-r.ui.HelpBubble.init = function() {
-    $('.help-bubble').each(function(idx, el) {
-        $(el).data('HelpBubble', new r.ui.HelpBubble(el))
-    })
-}
-r.ui.HelpBubble.prototype = $.extend(new r.ui.Base(), {
+r.ui.Bubble = Backbone.View.extend({
     showDelay: 150,
     hideDelay: 750,
+    animateDuration: 150,
+
+    initialize: function() {
+        this.$el.hover($.proxy(this, 'queueShow'), $.proxy(this, 'queueHide'))
+        this.$parent = this.options.parent || this.$el.parent()
+        this.$parent.hover($.proxy(this, 'queueShow'), $.proxy(this, 'queueHide'))
+        this.$parent.click($.proxy(this, 'queueShow'))
+    },
+
+    position: function() {
+        var parentPos = this.$parent.offset(),
+            bodyOffset = $('body').offset(),
+            offsetX, offsetY
+        if (this.$el.is('.anchor-top')) {
+            offsetX = this.$parent.outerWidth(true) - this.$el.outerWidth(true)
+            offsetY = this.$parent.outerHeight(true) + 5
+            this.$el.css({
+                left: parentPos.left + offsetX,
+                top: parentPos.top + offsetY - bodyOffset.top
+            })
+        } else if (this.$el.is('.anchor-right')) {
+            offsetX = 16
+            offsetY = 0
+            parentPos.right = $(window).width() - parentPos.left
+            this.$el.css({
+                right: parentPos.right + offsetX,
+                top: parentPos.top + offsetY - bodyOffset.top
+            })
+        } else if (this.$el.is('.anchor-right-fixed')) {
+            offsetX = 32
+            offsetY = 0
+
+            parentPos.top -= $(document).scrollTop()
+            parentPos.left -= $(document).scrollLeft()
+
+            this.$el.css({
+                top: r.utils.clamp(parentPos.top - offsetY, 0, $(window).height() - this.$el.outerHeight()),
+                left: r.utils.clamp(parentPos.left - offsetX - this.$el.width(), 0, $(window).width())
+            })
+        }
+    },
 
     show: function() {
         this.cancelTimeout()
+        if (this.$el.is(':visible')) {
+            return
+        }
+
+        this.trigger('show')
 
         $('body').append(this.$el)
 
-        var parentPos = this.$parent.offset()
-        this.$el
-            .show()
-            .offset({
-                left: parentPos.left + this.$parent.outerWidth(true) - this.$el.outerWidth(true),
-                top: parentPos.top + this.$parent.outerHeight(true) + 5
-            })
+        this.$el.css('visibility', 'hidden').show()
+        this.render()
+        this.position()
+        this.$el.css({
+            'opacity': 1,
+            'visibility': 'visible'
+        })
+
+        var isSwitch = this.options.group && this.options.group.current && this.options.group.current != this
+        if (isSwitch) {
+            this.options.group.current.hideNow()
+        } else {
+            this._animate('show')
+        }
+
+        if (this.options.group) {
+            this.options.group.current = this
+        }
+    },
+
+    hideNow: function() {
+        this.cancelTimeout()
+        if (this.options.group) {
+            this.options.group.current = null
+        }
+        this.$el.hide()
+        this.$parent.append(this.$el)
     },
 
     hide: function(callback) {
-        this.$el.fadeOut(150, $.proxy(function() {
-            this.$el.hide()
-            this.$parent.append(this.$el)
-            if (callback) {
-                callback()
-            }
+        if (!this.$el.is(':visible')) {
+            callback && callback()
+            return
+        }
+
+        this._animate('hide', $.proxy(function() {
+            this.hideNow()
+            callback && callback()
         }, this))
+    },
+
+    _animate: function(action, callback) {
+        if (!this.animateDuration) {
+            callback && callback()
+            return
+        }
+
+        var animProp, animOffset
+        if (this.$el.is('.anchor-top')) {
+            animProp = 'top'
+            animOffset = '-=5'
+        } else if (this.$el.is('.anchor-right')) {
+            animProp = 'right'
+            animOffset = '-=5'
+        } else if (this.$el.is('.anchor-right-fixed')) {
+            animProp = 'right'
+            animOffset = '-=5'
+        }
+        var curOffset = this.$el.css(animProp)
+
+        hideProps = {'opacity': 0}
+        hideProps[animProp] = animOffset
+        showProps = {'opacity': 1}
+        showProps[animProp] = curOffset
+
+        var start, end
+        if (action == 'show') {
+            start = hideProps
+            end = showProps
+        } else if (action == 'hide') {
+            start = showProps
+            end = hideProps
+        }
+
+        this.$el
+            .css(start)
+            .animate(end, this.animateDuration, callback)
     },
 
     cancelTimeout: function() {
@@ -399,3 +496,50 @@ r.ui.PermissionEditor.prototype = $.extend(new r.ui.Base(), {
         this.hide()
     }
 })
+
+r.ui.scrollFixed = function(el) {
+    this.$el = $(el)
+    this.$standin = null
+    this.onScroll()
+    $(window).bind('scroll resize', _.bind(_.throttle(this.onScroll, 20), this))
+}
+r.ui.scrollFixed.prototype = {
+    onScroll: function() {
+        if (!this.$el.is('.scroll-fixed')) {
+            var margin = this.$el.outerHeight(true) - this.$el.outerHeight(false)
+            this.origTop = this.$el.offset().top - margin
+        }
+
+        var enoughSpace = this.$el.height() < $(window).height()
+        if (enoughSpace && $(window).scrollTop() > this.origTop) {
+            if (!this.$standin) {
+                this.$standin = $('<' + this.$el.prop('nodeName') + '>')
+                    .css({
+                        width: this.$el.width(),
+                        height: this.$el.height()
+                    })
+                    .attr('class', this.$el.attr('class'))
+                    .addClass('scroll-fixed-standin')
+
+                this.$el
+                    .addClass('scroll-fixed')
+                    .css({
+                        position: 'fixed',
+                        top: 0
+                    })
+                this.$el.before(this.$standin)
+            }
+        } else {
+            if (this.$standin) {
+                this.$el
+                    .removeClass('scroll-fixed')
+                    .css({
+                        position: '',
+                        top: ''
+                    })
+                this.$standin.remove()
+                this.$standin = null
+            }
+        }
+    }
+}

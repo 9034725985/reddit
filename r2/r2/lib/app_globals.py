@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -159,7 +159,6 @@ class Globals(object):
             'static_secure_pre_gzipped',
             'trust_local_proxies',
             'shard_link_vote_queues',
-            'old_uwsgi_load_logging_config',
         ],
 
         ConfigValue.tuple: [
@@ -184,6 +183,13 @@ class Globals(object):
             'reserved_subdomains',
             'TRAFFIC_LOG_HOSTS',
             'exempt_login_user_agents',
+            'timed_templates',
+        ],
+
+        ConfigValue.str: [
+            'wiki_page_registration_info',
+            'wiki_page_privacy_policy',
+            'wiki_page_user_agreement',
         ],
 
         ConfigValue.choice: {
@@ -222,6 +228,8 @@ class Globals(object):
             'goldvertisement_blurbs',
             'goldvertisement_has_gold_blurbs',
             'welcomebar_messages',
+            'sidebar_message',
+            'gold_sidebar_message',
         ],
     }
 
@@ -327,11 +335,6 @@ class Globals(object):
         else:
             self.static_names = {}
 
-        # if we're a web app running on old uwsgi, force load the logging
-        # config from the file since uwsgi didn't do it for us
-        if not self.running_as_script and self.old_uwsgi_load_logging_config:
-            logging.config.fileConfig(self.config["__file__"])
-
         # make python warnings go through the logging system
         logging.captureWarnings(capture=True)
 
@@ -425,7 +428,11 @@ class Globals(object):
         num_mc_clients = self.num_mc_clients
 
         # the main memcache pool. used for most everything.
-        self.memcache = CMemcache(self.memcaches, num_clients=num_mc_clients)
+        self.memcache = CMemcache(
+            self.memcaches,
+            min_compress_len=50 * 1024,
+            num_clients=num_mc_clients,
+        )
 
         # a smaller pool of caches used only for distributed locks.
         # TODO: move this to ZooKeeper
@@ -438,6 +445,7 @@ class Globals(object):
         # a row cache.
         if self.permacache_memcaches:
             permacache_memcaches = CMemcache(self.permacache_memcaches,
+                                             min_compress_len=50 * 1024,
                                              num_clients=num_mc_clients)
         else:
             permacache_memcaches = None
@@ -456,6 +464,7 @@ class Globals(object):
             noreply=True,
             no_block=True,
             num_clients=num_mc_clients,
+            min_compress_len=1400,
         )
 
         # pagecaches hold fully rendered pages
@@ -464,6 +473,7 @@ class Globals(object):
             noreply=True,
             no_block=True,
             num_clients=num_mc_clients,
+            min_compress_len=1400,
         )
 
         self.startup_timer.intermediate("memcache")
@@ -506,7 +516,7 @@ class Globals(object):
         # initialize caches. Any cache-chains built here must be added
         # to cache_chains (closed around by reset_caches) so that they
         # can properly reset their local components
-        self.cache_chains = {}
+        cache_chains = {}
         localcache_cls = (SelfEmptyingCache if self.running_as_script
                           else LocalCache)
 
@@ -518,23 +528,23 @@ class Globals(object):
             )
         else:
             self.cache = MemcacheChain((localcache_cls(), self.memcache))
-        self.cache_chains.update(cache=self.cache)
+        cache_chains.update(cache=self.cache)
 
         self.rendercache = MemcacheChain((
             localcache_cls(),
             rendercaches,
         ))
-        self.cache_chains.update(rendercache=self.rendercache)
+        cache_chains.update(rendercache=self.rendercache)
 
         self.pagecache = MemcacheChain((
             localcache_cls(),
             pagecaches,
         ))
-        self.cache_chains.update(pagecache=self.pagecache)
+        cache_chains.update(pagecache=self.pagecache)
 
         # the thing_cache is used in tdb_cassandra.
         self.thing_cache = CacheChain((localcache_cls(),))
-        self.cache_chains.update(thing_cache=self.thing_cache)
+        cache_chains.update(thing_cache=self.thing_cache)
 
         self.permacache = CassandraCacheChain(
             localcache_cls(),
@@ -542,7 +552,7 @@ class Globals(object):
             memcache=permacache_memcaches,
             lock_factory=self.make_lock,
         )
-        self.cache_chains.update(permacache=self.permacache)
+        cache_chains.update(permacache=self.permacache)
 
         # hardcache is used for various things that tend to expire
         # TODO: replace hardcache w/ cassandra stuff
@@ -550,17 +560,17 @@ class Globals(object):
             (localcache_cls(), self.memcache, HardCache(self)),
             cache_negative_results=True,
         )
-        self.cache_chains.update(hardcache=self.hardcache)
+        cache_chains.update(hardcache=self.hardcache)
 
         # I know this sucks, but we need non-request-threads to be
         # able to reset the caches, so we need them be able to close
         # around 'cache_chains' without being able to call getattr on
         # 'g'
-        cache_chains = self.cache_chains.copy()
         def reset_caches():
             for name, chain in cache_chains.iteritems():
                 chain.reset()
                 chain.stats = CacheStats(self.stats, name)
+        self.cache_chains = cache_chains
 
         self.reset_caches = reset_caches
         self.reset_caches()

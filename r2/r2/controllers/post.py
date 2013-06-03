@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -102,6 +102,7 @@ class PostController(ApiController):
               pref_show_sponsors = VBoolean("show_sponsors"),
               pref_show_sponsorships = VBoolean("show_sponsorships"),
               pref_highlight_new_comments = VBoolean("highlight_new_comments"),
+              pref_monitor_mentions=VBoolean("monitor_mentions"),
               all_langs = VOneOf('all-langs', ('all', 'some'), default='all'))
     def POST_options(self, all_langs, pref_lang, **kw):
         #temporary. eventually we'll change pref_clickgadget to an

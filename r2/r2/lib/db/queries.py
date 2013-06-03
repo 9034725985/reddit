@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -47,6 +47,8 @@ from r2.lib.utils import SimpleSillyStub
 import cPickle as pickle
 
 from datetime import datetime
+from time import mktime
+import pytz
 import itertools
 import collections
 from copy import deepcopy
@@ -348,20 +350,27 @@ def get_spam_comments(sr_id):
     return Comment._query(Comment.c.sr_id == sr_id,
                           Comment.c._spam == True,
                           sort = db_sort('new'))
-@merged_cached_query
-def get_spam(sr, user=None):
+
+def moderated_srids(sr, user):
     if isinstance(sr, (ModContribSR, MultiReddit)):
         srs = Subreddit._byID(sr.sr_ids, return_dict=False)
         if user:
             srs = [sr for sr in srs
                    if sr.is_moderator_with_perms(user, 'posts')]
-        q = []
-        q.extend(get_spam_links(sr) for sr in srs)
-        q.extend(get_spam_comments(sr) for sr in srs)
-        return q
+        return [sr._id for sr in srs]
     else:
-        return [get_spam_links(sr),
-                get_spam_comments(sr)]
+        return [sr._id]
+
+@merged_cached_query
+def get_spam(sr, user=None, include_links=True, include_comments=True):
+    sr_ids = moderated_srids(sr, user)
+    queries = []
+
+    if include_links:
+        queries.append(get_spam_links)
+    if include_comments:
+        queries.append(get_spam_comments)
+    return [query(sr_id) for sr_id, query in itertools.product(sr_ids, queries)]
 
 @cached_query(SubredditQueryCache)
 def get_spam_filtered_links(sr_id):
@@ -399,19 +408,15 @@ def get_reported_comments(sr_id):
                           sort = db_sort('new'))
 
 @merged_cached_query
-def get_reported(sr, user=None):
-    if isinstance(sr, (ModContribSR, MultiReddit)):
-        srs = Subreddit._byID(sr.sr_ids, return_dict=False)
-        if user:
-            srs = [sr for sr in srs
-                   if sr.is_moderator_with_perms(user, 'posts')]
-        q = []
-        q.extend(get_reported_links(sr) for sr in srs)
-        q.extend(get_reported_comments(sr) for sr in srs)
-        return q
-    else:
-        return [get_reported_links(sr),
-                get_reported_comments(sr)]
+def get_reported(sr, user=None, include_links=True, include_comments=True):
+    sr_ids = moderated_srids(sr, user)
+    queries = []
+
+    if include_links:
+        queries.append(get_reported_links)
+    if include_comments:
+        queries.append(get_reported_comments)
+    return [query(sr_id) for sr_id, query in itertools.product(sr_ids, queries)]
 
 @cached_query(SubredditQueryCache)
 def get_unmoderated_links(sr_id):
@@ -425,36 +430,23 @@ def get_unmoderated_links(sr_id):
     return q
 
 @merged_cached_query
-def get_modqueue(sr, user=None):
-    q = []
-    if isinstance(sr, (ModContribSR, MultiReddit)):
-        srs = Subreddit._byID(sr.sr_ids, return_dict=False)
-        if user:
-            srs = [sr for sr in srs
-                   if sr.is_moderator_with_perms(user, 'posts')]
-        q.extend(get_reported_links(sr) for sr in srs)
-        q.extend(get_reported_comments(sr) for sr in srs)
-        q.extend(get_spam_filtered_links(sr) for sr in srs)
-        q.extend(get_spam_filtered_comments(sr) for sr in srs)
-    else:
-        q.append(get_reported_links(sr))
-        q.append(get_reported_comments(sr))
-        q.append(get_spam_filtered_links(sr))
-        q.append(get_spam_filtered_comments(sr))
-    return q
+def get_modqueue(sr, user=None, include_links=True, include_comments=True):
+    sr_ids = moderated_srids(sr, user)
+    queries = []
+
+    if include_links:
+        queries.append(get_reported_links)
+        queries.append(get_spam_filtered_links)
+    if include_comments:
+        queries.append(get_reported_comments)
+        queries.append(get_spam_filtered_comments)
+    return [query(sr_id) for sr_id, query in itertools.product(sr_ids, queries)]
 
 @merged_cached_query
 def get_unmoderated(sr, user=None):
-    q = []
-    if isinstance(sr, MultiReddit):
-        srs = Subreddit._byID(sr.sr_ids, return_dict=False)
-        if user:
-            srs = [sr for sr in srs
-                   if sr.is_moderator_with_perms(user, 'posts')]
-        q.extend(get_unmoderated_links(sr) for sr in srs)
-    else:
-        q.append(get_unmoderated_links(sr))
-    return q
+    sr_ids = moderated_srids(sr, user)
+    queries = [get_unmoderated_links]
+    return [query(sr_id) for sr_id, query in itertools.product(sr_ids, queries)]
 
 def get_domain_links(domain, sort, time):
     from r2.lib.db import operators
@@ -596,9 +588,22 @@ def get_unread_selfreply(user):
     return rel_query(inbox_comment_rel, user, 'selfreply',
                           filters = [inbox_comment_rel.c.new == True])
 
+
+@cached_userrel_query
+def get_inbox_comment_mentions(user):
+    return rel_query(inbox_comment_rel, user, "mention")
+
+
+@cached_userrel_query
+def get_unread_comment_mentions(user):
+    return rel_query(inbox_comment_rel, user, "mention",
+                     filters=[inbox_comment_rel.c.new == True])
+
+
 def get_inbox(user):
     return merge_results(get_inbox_comments(user),
                          get_inbox_messages(user),
+                         get_inbox_comment_mentions(user),
                          get_inbox_selfreply(user))
 
 @cached_query(UserQueryCache)
@@ -610,6 +615,7 @@ def get_sent(user_id):
 def get_unread_inbox(user):
     return merge_results(get_unread_comments(user),
                          get_unread_messages(user),
+                         get_unread_comment_mentions(user),
                          get_unread_selfreply(user))
 
 def _user_reported_query(user_id, thing_cls):
@@ -885,6 +891,8 @@ def new_comment(comment, inbox_rels):
                 else:
                     raise ValueError("wtf is " + inbox_rel._name)
 
+                # mentions happen in butler_q
+
                 if not comment._deleted:
                     m.insert(query, [inbox_rel])
                 else:
@@ -1000,6 +1008,8 @@ def set_unread(messages, to, unread, mutator=None):
                     query = get_unread_comments(i._thing1_id)
                 elif i._name == "selfreply":
                     query = get_unread_selfreply(i._thing1_id)
+                elif i._name == "mention":
+                    query = get_unread_comment_mentions(i._thing1_id)
             elif isinstance(messages[0], Message):
                 query = get_unread_messages(i._thing1_id)
             assert query is not None
@@ -1464,7 +1474,7 @@ def get_likes(user, items):
     return res
 
 def handle_vote(user, thing, dir, ip, organic,
-                cheater=False, foreground=False, timer=None):
+                cheater=False, foreground=False, timer=None, date=None):
     if timer is None:
         timer = SimpleSillyStub()
 
@@ -1472,7 +1482,7 @@ def handle_vote(user, thing, dir, ip, organic,
     from sqlalchemy.exc import IntegrityError
     try:
         v = Vote.vote(user, thing, dir, ip, organic, cheater = cheater,
-                      timer=timer)
+                      timer=timer, date=date)
     except (tdb_sql.CreationError, IntegrityError):
         g.log.error("duplicate vote for: %s" % str((user, thing, dir)))
         return
@@ -1530,12 +1540,18 @@ def process_votes(qname, limit=0):
         votee = Thing._by_fullname(tid, data = True)
         timer.intermediate("preamble")
 
+        # Convert the naive timestamp we got from amqplib to a
+        # timezone aware one.
+        tt = mktime(msg.timestamp.timetuple())
+        date = datetime.utcfromtimestamp(tt).replace(tzinfo=pytz.UTC)
+
         # I don't know how, but somebody is sneaking in votes
         # for subreddits
         if isinstance(votee, (Link, Comment)):
             print (voter, votee, dir, ip, organic, cheater)
             handle_vote(voter, votee, dir, ip, organic,
-                        cheater = cheater, foreground=True, timer=timer)
+                        cheater = cheater, foreground=True, timer=timer,
+                        date=date)
 
         if isinstance(votee, Comment):
             update_comment_votes([votee])

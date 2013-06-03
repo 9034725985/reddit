@@ -17,7 +17,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 """Check for new style guide violations in the current branch.
@@ -128,10 +128,13 @@ def select_files(files):
         if re.match(PYFILE, f):
             yield f
         else:
-            with open(f) as f_:
-                first = f_.readline()
-                if first.startswith('#!') and 'python' in first:
-                    yield f
+            try:
+                with open(f) as f_:
+                    first = f_.readline()
+                    if first.startswith('#!') and 'python' in first:
+                        yield f
+            except (IOError, OSError):
+                logging.exception("Unable to check-code against %s", f)
 
 
 def extract_errtype(violation, tool):

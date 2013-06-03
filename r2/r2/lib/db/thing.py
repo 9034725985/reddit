@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -35,7 +35,7 @@ from .. utils import iters, Results, tup, to36, Storage, thing_utils, timefromno
 from r2.config import cache
 from r2.lib.cache import sgm
 from r2.lib.log import log_text
-from r2.lib import stats
+from r2.lib import stats, hooks
 from pylons import g
 
 
@@ -297,7 +297,7 @@ class DataThing(object):
             if lock:
                 lock.release()
 
-        g.plugins.on_thing_commit(self, to_set)
+        hooks.get_hook("thing.commit").call(thing=self, changes=to_set)
 
     @classmethod
     def _load_multi(cls, need):
@@ -455,13 +455,14 @@ class DataThing(object):
         ids = [ int(x, 36) for x in id36s ]
 
         things = cls._byID(ids, return_dict=True, **kw)
+        things = {thing._id36: thing for thing in things.itervalues()}
 
         if single:
             return things.values()[0]
         elif return_dict:
             return things
         else:
-            return things.values()
+            return filter(None, (things.get(i) for i in id36s))
 
     @classmethod
     def _by_fullname(cls, names,

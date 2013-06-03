@@ -16,13 +16,14 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 from datetime import datetime, timedelta
 
 import itertools
 import json
+import urllib
 
 from pylons import c, g, request
 from pylons.i18n import _
@@ -33,6 +34,8 @@ from r2.lib.authorize import get_account_info, edit_profile, PROFILE_LIMIT
 from r2.lib.db import queries
 from r2.lib.errors import errors
 from r2.lib.media import force_thumbnail, thumbnail_url
+from r2.lib.memoize import memoize
+from r2.lib.menus import NamedButton, NavButton, NavMenu
 from r2.lib.pages import (
     LinkInfoPage,
     PaymentForm,
@@ -41,6 +44,8 @@ from r2.lib.pages import (
     PromotePage,
     PromoteLinkForm,
     PromoteLinkFormCpm,
+    PromoteReport,
+    Reddit,
     Roadblocks,
     UploadedImage,
 )
@@ -62,6 +67,7 @@ from r2.lib.validator import (
     VDateRange,
     VExistingUname,
     VFloat,
+    VImageType,
     VInt,
     VLength,
     VLink,
@@ -75,7 +81,16 @@ from r2.lib.validator import (
     VTitle,
     VUrl,
 )
-from r2.models import Link, Message, NotFound, PromoCampaign, PromotionLog
+from r2.models import (
+    Frontpage,
+    Link,
+    LiveAdWeights,
+    Message,
+    NotFound,
+    PromoCampaign,
+    PromotionLog,
+    Subreddit,
+)
 
 
 def _check_dates(dates):
@@ -107,6 +122,50 @@ class PromoteController(ListingController):
     def title_text(self):
         return _('promoted by you')
 
+    @classmethod
+    @memoize('live_by_subreddit', time=300)
+    def live_by_subreddit(cls, sr):
+        if sr == Frontpage:
+            sr_id = ''
+        else:
+            sr_id = sr._id
+        r = LiveAdWeights.get([sr_id])
+        return [i.link for i in r[sr_id]]
+
+    @classmethod
+    @memoize('subreddits_with_promos', time=3600)
+    def subreddits_with_promos(cls):
+        sr_ids = LiveAdWeights.get_live_subreddits()
+        srs = Subreddit._byID(sr_ids, return_dict=False)
+        sr_names = sorted([sr.name for sr in srs], key=lambda s: s.lower())
+        return sr_names
+
+    @property
+    def menus(self):
+        filters = [
+            NamedButton('all_promos', dest=''),
+            NamedButton('future_promos'),
+            NamedButton('unpaid_promos'),
+            NamedButton('rejected_promos'),
+            NamedButton('pending_promos'),
+            NamedButton('live_promos'),
+        ]
+        menus = [NavMenu(filters, base_path='/promoted', title='show',
+                        type='lightdrop')]
+
+        if self.sort == 'live_promos' and c.user_is_sponsor:
+            sr_names = self.subreddits_with_promos()
+            buttons = [NavButton(name, name) for name in sr_names]
+            frontbutton = NavButton('FRONTPAGE', Frontpage.name,
+                                    aliases=['/promoted/live_promos/%s' %
+                                             urllib.quote(Frontpage.name)])
+            buttons.insert(0, frontbutton)
+            buttons.insert(0, NavButton('all', ''))
+            menus.append(NavMenu(buttons, base_path='/promoted/live_promos',
+                                 title='subreddit', type='lightdrop'))
+
+        return menus
+
     def keep_fn(self):
         def keep(item):
             if item.promoted and not item._deleted:
@@ -125,7 +184,9 @@ class PromoteController(ListingController):
                 return queries.get_all_unpaid_links()
             elif self.sort == "rejected_promos":
                 return queries.get_all_rejected_links()
-            elif self.sort == "live_promos":
+            elif self.sort == "live_promos" and self.sr:
+                return self.live_by_subreddit(self.sr)
+            elif self.sort == 'live_promos':
                 return queries.get_all_live_links()
             return queries.get_all_promoted_links()
         else:
@@ -141,11 +202,20 @@ class PromoteController(ListingController):
                 return queries.get_live_links(c.user._id)
             return queries.get_promoted_links(c.user._id)
 
-    @validate(VSponsor())
-    def GET_listing(self, sort="", **env):
+    @validate(VSponsor(),
+              sr=nop('sr'))
+    def GET_listing(self, sr=None, sort="", **env):
         if not c.user_is_loggedin or not c.user.email_verified:
             return self.redirect("/ad_inq")
         self.sort = sort
+        self.sr = None
+        if sr and sr == Frontpage.name:
+            self.sr = Frontpage
+        elif sr:
+            try:
+                self.sr = Subreddit._by_name(sr)
+            except NotFound:
+                pass
         return ListingController.GET_listing(self, **env)
 
     GET_index = GET_listing
@@ -558,8 +628,8 @@ class PromoteController(ListingController):
             form.set_inputs(name="")
             form.set_html(".status:first", _("added"))
             if promote.add_traffic_viewer(thing, user):
-                user_row = TrafficViewerList(thing).user_row('traffic', user)
-                jquery("#traffic-table").show(
+                user_row = TrafficViewerList(thing).user_row('traffic_viewer', user)
+                jquery(".traffic_viewer-table").show(
                     ).find("table").insert_table_rows(user_row)
 
                 # send the user a message
@@ -659,14 +729,15 @@ class PromoteController(ListingController):
 
     @validate(VSponsor("link_id"),
               link=VByName('link_id'),
-              file=VLength('file', 500 * 1024))
-    def POST_link_thumb(self, link=None, file=None):
+              file=VLength('file', 500 * 1024),
+              img_type=VImageType('img_type'))
+    def POST_link_thumb(self, link=None, file=None, img_type='jpg'):
         if link and (not promote.is_promoted(link) or
                      c.user_is_sponsor or c.user.trusted_sponsor):
             errors = dict(BAD_CSS_NAME="", IMAGE_ERROR="")
             try:
                 # thumnails for promoted links can change and therefore expire
-                force_thumbnail(link, file, file_type=".jpg")
+                force_thumbnail(link, file, file_type=".%s" % img_type)
             except cssfilter.BadImage:
                 # if the image doesn't clean up nicely, abort
                 errors["IMAGE_ERROR"] = _("bad image")
@@ -689,4 +760,31 @@ class PromoteController(ListingController):
                               start=dates[0],
                               end=dates[1]).render()
 
+    @validate(VSponsorAdmin(),
+              start=VDate('startdate'),
+              end=VDate('enddate'),
+              link_text=nop('link_text'))
+    def GET_report(self, start, end, link_text=None):
+        now = datetime.now(g.tz).replace(hour=0, minute=0, second=0,
+                                         microsecond=0)
+        end = end or now - timedelta(days=1)
+        start = start or end - timedelta(days=7)
 
+        if link_text is not None:
+            names = link_text.replace(',', ' ').split()
+            try:
+                links = Link._by_fullname(names, data=True)
+            except NotFound:
+                links = {}
+
+            bad_links = [name for name in names if name not in links]
+            links = links.values()
+        else:
+            links = []
+            bad_links = []
+
+        content = PromoteReport(links, link_text, bad_links, start, end)
+        if c.render_style == 'csv':
+            return content.as_csv()
+        else:
+            return PromotePage('report', content=content).render()

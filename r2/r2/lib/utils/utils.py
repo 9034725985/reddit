@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -39,7 +39,7 @@ from decimal import Decimal
 from BeautifulSoup import BeautifulSoup, SoupStrainer
 
 from time import sleep
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pylons import c, g
 from pylons.i18n import ungettext, _
 from r2.lib.filters import _force_unicode, _force_utf8
@@ -309,6 +309,9 @@ def extract_title(data):
     # only trim if it won't take off over half the title
     if to_trim and to_trim.end() < len(title) / 2:
         title = title[:-(to_trim.end())]
+
+    # get rid of extraneous whitespace in the title
+    title = re.sub(r'\s+', ' ', title, flags=re.UNICODE)
 
     return title.encode('utf-8').strip()
     
@@ -1106,6 +1109,11 @@ def make_offset_date(start_date, interval, future = True,
 def to_date(d):
     if isinstance(d, datetime):
         return d.date()
+    return d
+
+def to_datetime(d):
+    if isinstance(d, date):
+        return datetime(d.year, d.month, d.day)
     return d
 
 def in_chunks(it, size=25):

@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -45,7 +45,7 @@ from pylons.i18n import _
 from pylons.i18n.translation import LanguageError
 
 from r2.config.extensions import is_api
-from r2.lib import filters, pages, utils
+from r2.lib import filters, pages, utils, hooks
 from r2.lib.authentication import authenticate_user
 from r2.lib.base import BaseController, abort
 from r2.lib.cache import make_key, MemcachedError
@@ -57,10 +57,11 @@ from r2.lib.errors import (
 )
 from r2.lib.filters import _force_utf8
 from r2.lib.strings import strings
-from r2.lib.template_helpers import add_sr
+from r2.lib.template_helpers import add_sr, JSPreload
 from r2.lib.tracking import encrypt, decrypt
 from r2.lib.translation import set_lang
 from r2.lib.utils import (
+    Enum,
     SimpleSillyStub,
     UniqueIterator,
     http_utils,
@@ -84,7 +85,6 @@ from r2.lib.validator import (
 from r2.models import (
     All,
     AllMinus,
-    check_request,
     DefaultSR,
     DomainSR,
     FakeAccount,
@@ -107,6 +107,30 @@ from r2.models import (
 
 NEVER = datetime(2037, 12, 31, 23, 59, 59)
 DELETE = datetime(1970, 01, 01, 0, 0, 1)
+PAGECACHE_POLICY = Enum(
+    # logged in users may use the pagecache as well.
+    "LOGGEDIN_AND_LOGGEDOUT",
+    # only attempt to use pagecache if the current user is not logged in.
+    "LOGGEDOUT_ONLY",
+    # do not use pagecache.
+    "NEVER",
+)
+
+
+def pagecache_policy(policy):
+    """Decorate a controller method to specify desired pagecache behaviour.
+
+    If not specified, the policy will default to LOGGEDOUT_ONLY.
+
+    """
+
+    assert policy in PAGECACHE_POLICY
+
+    def pagecache_decorator(fn):
+        fn.pagecache_policy = policy
+        return fn
+    return pagecache_decorator
+
 
 cache_affecting_cookies = ('over18', '_options')
 
@@ -289,9 +313,8 @@ def delete_obsolete_cookies():
             c.cookies[cookie_name] = Cookie("", expires=DELETE)
 
 def over18():
-    if c.user.pref_over_18 or c.user_is_admin:
-        return True
-
+    if c.user_is_loggedin:
+        return c.user.pref_over_18 or c.user_is_admin
     else:
         if 'over18' in c.cookies:
             cookie = c.cookies['over18'].value
@@ -665,6 +688,8 @@ class MinimalController(BaseController):
     def pre(self):
         action = request.environ["pylons.routes_dict"].get("action")
         if action:
+            if not self._get_action_handler():
+                action = 'invalid'
             c.request_timer = g.stats.get_timer(request_timer_name(action))
         else:
             c.request_timer = SimpleSillyStub()
@@ -686,8 +711,7 @@ class MinimalController(BaseController):
         if c.secure:
             request.environ["wsgi.url_scheme"] = "https"
 
-        url = urlparse(request.url)
-        c.request_origin = url.scheme + "://" + url.netloc
+        c.request_origin = request.host_url
 
         #check if user-agent needs a dose of rate-limiting
         if not c.error_page:
@@ -703,13 +727,29 @@ class MinimalController(BaseController):
         # if an rss feed, this will also log the user in if a feed=
         # GET param is included
         set_content_type()
+
         c.request_timer.intermediate("minimal-pre")
         # True/False forces. None updates for most non-POST requests
         c.update_last_visit = None
 
+        g.stats.count_string('user_agents', request.user_agent)
+
+    def can_use_pagecache(self):
+        handler = self._get_action_handler()
+        policy = getattr(handler, "pagecache_policy",
+                         PAGECACHE_POLICY.LOGGEDOUT_ONLY)
+
+        if policy == PAGECACHE_POLICY.LOGGEDIN_AND_LOGGEDOUT:
+            return True
+        elif policy == PAGECACHE_POLICY.LOGGEDOUT_ONLY:
+            return not c.user_is_loggedin
+
+        return False
+
     def try_pagecache(self):
-        #check content cache
-        if request.method.upper() == 'GET' and not c.user_is_loggedin:
+        c.can_use_pagecache = self.can_use_pagecache()
+
+        if request.method.upper() == 'GET' and c.can_use_pagecache:
             r = g.pagecache.get(self.request_key())
             if r:
                 r, c.cookies = r
@@ -743,12 +783,14 @@ class MinimalController(BaseController):
         if c.deny_frames:
             response.headers["X-Frame-Options"] = "DENY"
 
-        #set content cache
+        # save the result of this page to the pagecache if possible.  we
+        # mustn't cache things that rely on state not tracked by request_key
+        # such as If-Modified-Since headers for 304s or requesting IP for 429s.
         if (g.page_cache_time
             and request.method.upper() == 'GET'
-            and (not c.user_is_loggedin or c.allow_loggedin_cache)
+            and c.can_use_pagecache
             and not c.used_cache
-            and response.status_int != 429
+            and response.status_int not in (304, 429)
             and not response.status.startswith("5")
             and not c.is_exception_response):
             try:
@@ -761,6 +803,15 @@ class MinimalController(BaseController):
                 g.log.warning("Ignored exception (%r) on pagecache "
                               "write for %r", e, request.path)
 
+        pragmas = [p.strip() for p in
+                   request.headers.get("Pragma", "").split(",")]
+        if g.debug or "x-reddit-pagecache" in pragmas:
+            if c.can_use_pagecache:
+                pagecache_state = "hit" if c.used_cache else "miss"
+            else:
+                pagecache_state = "disallowed"
+            response.headers["X-Reddit-Pagecache"] = pagecache_state
+
         # send cookies
         for k, v in c.cookies.iteritems():
             if v.dirty:
@@ -771,12 +822,10 @@ class MinimalController(BaseController):
                                     secure=getattr(v, 'secure', False),
                                     httponly=getattr(v, 'httponly', False))
 
-        end_time = datetime.now(g.tz)
-
         if self.should_update_last_visit():
             c.user.update_last_visit(c.start_time)
 
-        check_request(end_time)
+        hooks.get_hook("reddit.request.end").call()
 
         # this thread is probably going to be reused, but it could be
         # a while before it is. So we might as well dump the cache in
@@ -890,6 +939,9 @@ class RedditController(MinimalController):
         if admin_bar_eligible and record_timings:
             g.stats.start_logging_timings()
 
+        # set up stuff needed in base templates at error time here.
+        c.js_preload = JSPreload()
+
         MinimalController.pre(self)
 
         set_cnameframe()
@@ -977,7 +1029,7 @@ class RedditController(MinimalController):
 
         # random reddit trickery -- have to do this after the content lang is set
         if c.site == Random:
-            c.site = Subreddit.random_reddit()
+            c.site = Subreddit.random_reddit(user=c.user)
             redirect_to("/" + c.site.path.strip('/') + request.path)
         elif c.site == RandomSubscription:
             if c.user.gold:
@@ -986,7 +1038,7 @@ class RedditController(MinimalController):
             else:
                 redirect_to('/gold/about')
         elif c.site == RandomNSFW:
-            c.site = Subreddit.random_reddit(over18=True)
+            c.site = Subreddit.random_reddit(over18=True, user=c.user)
             redirect_to("/" + c.site.path.strip('/') + request.path)
 
         if not request.path.startswith("/api/login/"):
@@ -1040,6 +1092,8 @@ class RedditController(MinimalController):
         c.show_admin_bar = admin_bar_eligible and (c.user_is_admin or g.debug)
         if not c.show_admin_bar:
             g.stats.end_logging_timings()
+
+        hooks.get_hook("reddit.request.begin").call()
 
         c.request_timer.intermediate("base-pre")
 

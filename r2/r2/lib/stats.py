@@ -16,11 +16,12 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
 import collections
+import functools
 import os
 import random
 import socket
@@ -50,10 +51,11 @@ class TimingStatBuffer:
         self.data = collections.defaultdict(complex)
         self.log = threading.local()
 
-    def record(self, key, start, end):
-        # Add to the total time and total count with a single complex value,
-        # so as to avoid inconsistency from a poorly timed context switch.
-        self.data[key] += (end - start) + 1j
+    def record(self, key, start, end, publish=True):
+        if publish:
+            # Add to the total time and total count with a single complex value,
+            # so as to avoid inconsistency from a poorly timed context switch.
+            self.data[key] += (end - start) + 1j
 
         if getattr(self.log, 'timings', None) is not None:
             self.log.timings.append(self.Timing(key, start, end))
@@ -96,6 +98,34 @@ class CountingStatBuffer:
         data, self.data = self.data, collections.defaultdict(int)
         for k, v in data.iteritems():
             yield k, str(v) + '|c'
+
+
+class StringCountBuffer:
+    """Dictionary of keys to counts of various values."""
+
+    def __init__(self):
+        self.data = collections.defaultdict(
+            functools.partial(collections.defaultdict, int))
+
+    @staticmethod
+    def _encode_string(string):
+        # escape \ -> \\, | -> \&, : -> \;, and newline -> \n
+        return (
+            string.replace('\\', '\\\\')
+                .replace('\n', '\\n')
+                .replace('|', '\\&')
+                .replace(':', '\\;'))
+
+    def record(self, key, value, count=1):
+        self.data[key][value] += count
+
+    def flush(self):
+        new_data = collections.defaultdict(
+            functools.partial(collections.defaultdict, int))
+        data, self.data = self.data, new_data
+        for k, counts in data.iteritems():
+            for v, count in counts.iteritems():
+                yield k, str(count) + '|s|' + self._encode_string(v)
 
 
 class StatsdConnection:
@@ -149,6 +179,7 @@ class StatsdClient:
         self.sample_rate = sample_rate
         self.timing_stats = TimingStatBuffer()
         self.counting_stats = CountingStatBuffer()
+        self.string_counts = StringCountBuffer()
         self.connect(addr)
 
     def connect(self, addr):
@@ -160,6 +191,7 @@ class StatsdClient:
     def flush(self):
         data = list(self.timing_stats.flush())
         data.extend(self.counting_stats.flush())
+        data.extend(self.string_counts.flush())
         self.conn.send(self._data_iterator(data))
 
 
@@ -198,9 +230,10 @@ class Counter:
 class Timer:
     _time = time.time
 
-    def __init__(self, client, name):
+    def __init__(self, client, name, publish=True):
         self.client = client
         self.name = name
+        self.publish = publish
         self._start = None
         self._last = None
         self._stop = None
@@ -220,7 +253,8 @@ class Timer:
 
     def send(self, subname, start, end):
         name = _get_stat_name(self.name, subname)
-        self.client.timing_stats.record(name, start, end)
+        self.client.timing_stats.record(name, start, end,
+                                        publish=self.publish)
 
     def start(self):
         self._last = self._start = self._time()
@@ -253,8 +287,8 @@ class Stats:
     def __init__(self, addr, sample_rate):
         self.client = StatsdClient(addr, sample_rate)
 
-    def get_timer(self, name):
-        return Timer(self.client, name)
+    def get_timer(self, name, publish=True):
+        return Timer(self.client, name, publish)
 
     def transact(self, action, start, end):
         timer = self.get_timer('service_time')
@@ -362,6 +396,9 @@ class Stats:
             return
         key = '.'.join(['pg', db_server.replace('.', '-'), db_name])
         self.client.timing_stats.record(key, start, end)
+
+    def count_string(self, key, value, count=1):
+        self.client.string_counts.record(key, str(value), count=count)
    
 
 class CacheStats:

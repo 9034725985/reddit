@@ -16,7 +16,7 @@
 # The Original Developer is the Initial Developer.  The Initial Developer of
 # the Original Code is reddit Inc.
 #
-# All portions of the code written by reddit are Copyright (c) 2006-2012 reddit
+# All portions of the code written by reddit are Copyright (c) 2006-2013 reddit
 # Inc. All Rights Reserved.
 ###############################################################################
 
@@ -128,9 +128,13 @@ class ModAction(tdb_cassandra.UuidThing, Printable):
                      'lang': _('language'),
                      'type': _('type'),
                      'link_type': _('link type'),
+                     'submit_link_label': _('submit link button label'),
+                     'submit_text_label': _('submit text post button label'),
+                     'comment_score_hide_mins': _('comment score hide period'),
                      'over_18': _('toggle viewers must be over 18'),
                      'allow_top': _('toggle allow in default set'),
                      'show_media': _('toggle show thumbnail images of content'),
+                     'exclude_banned_modqueue': _('toggle exclude banned users\' posts from modqueue'),
                      'domain': _('domain'),
                      'show_cname_sidebar': _('toggle show sidebar from cname'),
                      'css_on_cname': _('toggle custom CSS from cname'),
